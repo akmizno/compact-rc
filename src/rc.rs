@@ -15,6 +15,20 @@ use std::ptr::NonNull;
 
 use num::{one, CheckedAdd, Unsigned};
 
+pub trait MarkerCounter: Copy + CheckedAdd + Sub + Unsigned {}
+
+impl MarkerCounter for u8 {}
+impl MarkerCounter for u16 {}
+impl MarkerCounter for u32 {}
+impl MarkerCounter for u64 {}
+impl MarkerCounter for usize {}
+
+pub type Rc8<T> = RcX<T, u8>;
+pub type Rc16<T> = RcX<T, u16>;
+pub type Rc32<T> = RcX<T, u32>;
+pub type Rc64<T> = RcX<T, u64>;
+pub type Rc<T> = RcX<T, usize>;
+
 // NOTE
 // `std::rc::RcBox` uses #[repr(C)], but this does not.
 // Some methods such as `into_raw` and `from_raw` can not be implemented
@@ -24,7 +38,7 @@ struct RcBox<T: ?Sized, C> {
     value: T,
 }
 
-impl<T: ?Sized, C: Copy + CheckedAdd + Sub + Unsigned> RcBox<T, C> {
+impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
     fn strong(&self) -> C {
         self.strong.get()
     }
@@ -46,36 +60,36 @@ impl<T: ?Sized, C: Copy + CheckedAdd + Sub + Unsigned> RcBox<T, C> {
     }
 }
 
-pub struct Rc<T: ?Sized> {
-    ptr: NonNull<RcBox<T, usize>>,
+pub struct RcX<T: ?Sized, C: MarkerCounter> {
+    ptr: NonNull<RcBox<T, C>>,
 }
 
-impl<T: RefUnwindSafe + ?Sized> UnwindSafe for Rc<T> {}
-impl<T: RefUnwindSafe + ?Sized> RefUnwindSafe for Rc<T> {}
+impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> UnwindSafe for RcX<T, C> {}
+impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> RefUnwindSafe for RcX<T, C> {}
 
-impl<T: ?Sized> Rc<T> {
-    fn inner(&self) -> &RcBox<T, usize> {
+impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
+    fn inner(&self) -> &RcBox<T, C> {
         unsafe { self.ptr.as_ref() }
     }
 
-    unsafe fn from_inner(ptr: NonNull<RcBox<T, usize>>) -> Self {
+    unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
         Self { ptr }
     }
 }
 
-impl<T> Rc<T> {
+impl<T, C: MarkerCounter> RcX<T, C> {
     /// See [std::rc::Rc::new].
-    pub fn new(value: T) -> Rc<T> {
+    pub fn new(value: T) -> RcX<T, C> {
         unsafe {
             Self::from_inner(NonNull::from(Box::leak(Box::new(RcBox {
-                strong: Cell::new(1),
+                strong: Cell::new(C::one()),
                 value,
             }))))
         }
     }
 
     /// See [std::rc::Rc::pin].
-    pub fn pin(_value: T) -> Pin<Rc<T>> {
+    pub fn pin(_value: T) -> Pin<RcX<T, C>> {
         todo!();
     }
 
@@ -85,15 +99,15 @@ impl<T> Rc<T> {
     }
 }
 
-impl<T: ?Sized> Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     /// See [std::rc::Rc::as_ptr].
     pub fn as_ptr(this: &Self) -> *const T {
-        let ptr: *mut RcBox<T, usize> = NonNull::as_ptr(this.ptr);
+        let ptr: *mut RcBox<T, C> = NonNull::as_ptr(this.ptr);
         unsafe { ptr::addr_of_mut!((*ptr).value) }
     }
 
     /// See [std::rc::Rc::strong_count].
-    pub fn strong_count(this: &Self) -> usize {
+    pub fn strong_count(this: &Self) -> C {
         this.inner().strong()
     }
 
@@ -108,21 +122,21 @@ impl<T: ?Sized> Rc<T> {
     }
 }
 
-impl<T: Clone> Rc<T> {
+impl<T: Clone, C: MarkerCounter> RcX<T, C> {
     /// See [std::rc::Rc::make_mut].
     pub fn make_mut(_this: &mut Self) -> &mut T {
         todo!();
     }
 }
 
-impl Rc<dyn Any> {
+impl<C: MarkerCounter> RcX<dyn Any, C> {
     /// See [std::rc::Rc::downcast].
-    pub fn downcast<T: Any>(self) -> Result<Rc<T>, Rc<dyn Any>> {
+    pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
         todo!();
     }
 }
 
-impl<T: ?Sized> Deref for Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> Deref for RcX<T, C> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -130,10 +144,10 @@ impl<T: ?Sized> Deref for Rc<T> {
     }
 }
 
-impl<T: ?Sized> Drop for Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> Drop for RcX<T, C> {
     fn drop(&mut self) {
         self.inner().dec_strong();
-        if self.inner().strong() == 0 {
+        if self.inner().strong().is_zero() {
             unsafe {
                 drop(Box::from_raw(self.ptr.as_mut()));
             }
@@ -141,148 +155,148 @@ impl<T: ?Sized> Drop for Rc<T> {
     }
 }
 
-impl<T: ?Sized> Clone for Rc<T> {
-    fn clone(&self) -> Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> Clone for RcX<T, C> {
+    fn clone(&self) -> RcX<T, C> {
         self.inner().inc_strong();
         unsafe { Self::from_inner(self.ptr) }
     }
 }
 
-impl<T: Default> Default for Rc<T> {
-    fn default() -> Rc<T> {
-        Rc::new(Default::default())
+impl<T: Default, C: MarkerCounter> Default for RcX<T, C> {
+    fn default() -> RcX<T, C> {
+        RcX::new(Default::default())
     }
 }
 
-impl<T: ?Sized + PartialEq> PartialEq for Rc<T> {
-    fn eq(&self, other: &Rc<T>) -> bool {
+impl<T: ?Sized + PartialEq, C: MarkerCounter> PartialEq for RcX<T, C> {
+    fn eq(&self, other: &RcX<T, C>) -> bool {
         // NOTE
         // Optimization by comparing their addresses can not be used for T: PartialEq.
         // For T: Eq, it is possible. But the specialization is unstable feature.
         PartialEq::eq(&**self, &**other)
     }
-    fn ne(&self, other: &Rc<T>) -> bool {
+    fn ne(&self, other: &RcX<T, C>) -> bool {
         PartialEq::ne(&**self, &**other)
     }
 }
 
-impl<T: ?Sized + Eq> Eq for Rc<T> {}
+impl<T: ?Sized + Eq, C: MarkerCounter> Eq for RcX<T, C> {}
 
-impl<T: ?Sized + PartialOrd> PartialOrd for Rc<T> {
-    fn partial_cmp(&self, other: &Rc<T>) -> Option<Ordering> {
+impl<T: ?Sized + PartialOrd, C: MarkerCounter> PartialOrd for RcX<T, C> {
+    fn partial_cmp(&self, other: &RcX<T, C>) -> Option<Ordering> {
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
 
-impl<T: ?Sized + Ord> Ord for Rc<T> {
-    fn cmp(&self, other: &Rc<T>) -> Ordering {
+impl<T: ?Sized + Ord, C: MarkerCounter> Ord for RcX<T, C> {
+    fn cmp(&self, other: &RcX<T, C>) -> Ordering {
         Ord::cmp(&**self, &**other)
     }
 }
 
-impl<T: ?Sized + Hash> Hash for Rc<T> {
+impl<T: ?Sized + Hash, C: MarkerCounter> Hash for RcX<T, C> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
     }
 }
 
-impl<T: ?Sized + fmt::Display> fmt::Display for Rc<T> {
+impl<T: ?Sized + fmt::Display, C: MarkerCounter> fmt::Display for RcX<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized + fmt::Debug> fmt::Debug for Rc<T> {
+impl<T: ?Sized + fmt::Debug, C: MarkerCounter> fmt::Debug for RcX<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized> fmt::Pointer for Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> fmt::Pointer for RcX<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Pointer::fmt(&(Rc::as_ptr(self)), f)
+        fmt::Pointer::fmt(&(RcX::as_ptr(self)), f)
     }
 }
 
-impl<T> From<T> for Rc<T> {
+impl<T, C: MarkerCounter> From<T> for RcX<T, C> {
     fn from(_t: T) -> Self {
         todo!();
     }
 }
 
-impl<T: Clone> From<&[T]> for Rc<[T]> {
-    fn from(_v: &[T]) -> Rc<[T]> {
+impl<T: Clone, C: MarkerCounter> From<&[T]> for RcX<[T], C> {
+    fn from(_v: &[T]) -> RcX<[T], C> {
         todo!();
     }
 }
 
-impl From<&str> for Rc<str> {
-    fn from(_v: &str) -> Rc<str> {
+impl<C: MarkerCounter> From<&str> for RcX<str, C> {
+    fn from(_v: &str) -> RcX<str, C> {
         todo!();
     }
 }
 
-impl From<String> for Rc<str> {
-    fn from(_v: String) -> Rc<str> {
+impl<C: MarkerCounter> From<String> for RcX<str, C> {
+    fn from(_v: String) -> RcX<str, C> {
         todo!();
     }
 }
 
-impl<T: ?Sized> From<Box<T>> for Rc<T> {
-    fn from(_v: Box<T>) -> Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> From<Box<T>> for RcX<T, C> {
+    fn from(_v: Box<T>) -> RcX<T, C> {
         todo!();
     }
 }
 
-impl<T> From<Vec<T>> for Rc<[T]> {
-    fn from(mut _v: Vec<T>) -> Rc<[T]> {
+impl<T, C: MarkerCounter> From<Vec<T>> for RcX<[T], C> {
+    fn from(mut _v: Vec<T>) -> RcX<[T], C> {
         todo!();
     }
 }
 
-impl<'a, B> From<Cow<'a, B>> for Rc<B>
+impl<'a, B, C: MarkerCounter> From<Cow<'a, B>> for RcX<B, C>
 where
     B: ToOwned + ?Sized,
-    Rc<B>: From<&'a B> + From<B::Owned>,
+    RcX<B, C>: From<&'a B> + From<B::Owned>,
 {
-    fn from(_cow: Cow<'a, B>) -> Rc<B> {
+    fn from(_cow: Cow<'a, B>) -> RcX<B, C> {
         todo!();
     }
 }
 
-impl From<Rc<str>> for Rc<[u8]> {
-    fn from(_rc: Rc<str>) -> Self {
+impl<C: MarkerCounter> From<RcX<str, C>> for RcX<[u8], C> {
+    fn from(_rc: RcX<str, C>) -> Self {
         todo!();
     }
 }
 
-impl<T, const N: usize> TryFrom<Rc<[T]>> for Rc<[T; N]> {
-    type Error = Rc<[T]>;
+impl<T, C: MarkerCounter, const N: usize> TryFrom<RcX<[T], C>> for RcX<[T; N], C> {
+    type Error = RcX<[T], C>;
 
-    fn try_from(_boxed_slice: Rc<[T]>) -> Result<Self, Self::Error> {
+    fn try_from(_boxed_slice: RcX<[T], C>) -> Result<Self, Self::Error> {
         todo!();
     }
 }
 
-impl<T> iter::FromIterator<T> for Rc<[T]> {
+impl<T, C: MarkerCounter> iter::FromIterator<T> for RcX<[T], C> {
     fn from_iter<I: iter::IntoIterator<Item = T>>(_iter: I) -> Self {
         todo!();
     }
 }
 
-impl<T: ?Sized> borrow::Borrow<T> for Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> borrow::Borrow<T> for RcX<T, C> {
     fn borrow(&self) -> &T {
         todo!();
     }
 }
 
-impl<T: ?Sized> AsRef<T> for Rc<T> {
+impl<T: ?Sized, C: MarkerCounter> AsRef<T> for RcX<T, C> {
     fn as_ref(&self) -> &T {
         todo!();
     }
 }
 
-impl<T: ?Sized> Unpin for Rc<T> {}
+impl<T: ?Sized, C: MarkerCounter> Unpin for RcX<T, C> {}
 
 #[cfg(test)]
 mod tests {
@@ -291,29 +305,29 @@ mod tests {
 
     #[test]
     fn new_deref() {
-        let rc = Rc::new(1);
+        let rc = Rc8::new(1);
         assert_eq!(*rc, 1);
     }
 
     #[test]
     fn clone_drop_strong_count() {
-        let rc1 = Rc::new(1);
-        assert_eq!(Rc::strong_count(&rc1), 1);
+        let rc1 = Rc8::new(1);
+        assert_eq!(RcX::strong_count(&rc1), 1);
 
         let rc2 = rc1.clone();
-        assert_eq!(Rc::strong_count(&rc1), 2);
-        assert_eq!(Rc::strong_count(&rc2), 2);
+        assert_eq!(RcX::strong_count(&rc1), 2);
+        assert_eq!(RcX::strong_count(&rc2), 2);
         assert_eq!(*rc1, 1);
         assert_eq!(*rc2, 1);
 
         drop(rc1);
-        assert_eq!(Rc::strong_count(&rc2), 1);
+        assert_eq!(RcX::strong_count(&rc2), 1);
         assert_eq!(*rc2, 1);
     }
 
     #[test]
     fn default() {
-        let rc = Rc::<String>::default();
+        let rc = Rc8::<String>::default();
         let stdrc = StdRc::<String>::default();
 
         assert_eq!(*rc, *stdrc);
@@ -321,7 +335,7 @@ mod tests {
 
     #[test]
     fn debug() {
-        let rc = Rc::new("debug".to_string());
+        let rc = Rc8::new("debug".to_string());
         let stdrc = StdRc::new("debug".to_string());
 
         assert_eq!(format!("{:?}", rc), format!("{:?}", stdrc));
@@ -329,7 +343,7 @@ mod tests {
 
     #[test]
     fn display() {
-        let rc = Rc::new("debug".to_string());
+        let rc = Rc8::new("debug".to_string());
         let stdrc = StdRc::new("debug".to_string());
 
         assert_eq!(format!("{}", rc), format!("{}", stdrc));
@@ -337,25 +351,25 @@ mod tests {
 
     #[test]
     fn pointer() {
-        let rc = Rc::new("debug".to_string());
+        let rc = Rc8::new("debug".to_string());
 
-        assert_eq!(format!("{:p}", rc), format!("{:p}", Rc::as_ptr(&rc)));
+        assert_eq!(format!("{:p}", rc), format!("{:p}", RcX::as_ptr(&rc)));
     }
 
     #[test]
     fn as_ptr() {
-        let rc = Rc::<u32>::new(1);
+        let rc = Rc8::<u32>::new(1);
 
         unsafe {
-            assert_eq!(*Rc::as_ptr(&rc), 1);
+            assert_eq!(*RcX::as_ptr(&rc), 1);
         }
     }
 
     #[test]
     fn eq_ne() {
-        let rc = Rc::<u32>::new(1);
-        let rc1 = Rc::<u32>::new(1);
-        let rc2 = Rc::<u32>::new(2);
+        let rc = Rc8::<u32>::new(1);
+        let rc1 = Rc8::<u32>::new(1);
+        let rc2 = Rc8::<u32>::new(2);
 
         assert_eq!(rc, rc1);
         assert_ne!(rc, rc2);
@@ -363,10 +377,10 @@ mod tests {
 
     #[test]
     fn partial_cmp() {
-        let rc = Rc::<u32>::new(2);
-        let rc1 = Rc::<u32>::new(1);
-        let rc2 = Rc::<u32>::new(2);
-        let rc3 = Rc::<u32>::new(3);
+        let rc = Rc8::<u32>::new(2);
+        let rc1 = Rc8::<u32>::new(1);
+        let rc2 = Rc8::<u32>::new(2);
+        let rc3 = Rc8::<u32>::new(3);
 
         assert_eq!(
             PartialOrd::partial_cmp(&rc, &rc1),
@@ -384,10 +398,10 @@ mod tests {
 
     #[test]
     fn cmp() {
-        let rc = Rc::<u32>::new(2);
-        let rc1 = Rc::<u32>::new(1);
-        let rc2 = Rc::<u32>::new(2);
-        let rc3 = Rc::<u32>::new(3);
+        let rc = Rc8::<u32>::new(2);
+        let rc1 = Rc8::<u32>::new(1);
+        let rc2 = Rc8::<u32>::new(2);
+        let rc3 = Rc8::<u32>::new(3);
 
         assert_eq!(Ord::cmp(&rc, &rc1), Ord::cmp(&2, &1));
         assert_eq!(Ord::cmp(&rc, &rc2), Ord::cmp(&2, &2));
@@ -396,7 +410,7 @@ mod tests {
 
     #[test]
     fn hash() {
-        let rc = Rc::new("hello".to_string());
+        let rc = Rc8::new("hello".to_string());
 
         let mut h = std::collections::hash_map::DefaultHasher::default();
         Hash::hash(&rc, &mut h);
