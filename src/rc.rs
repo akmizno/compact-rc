@@ -70,6 +70,9 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     fn inner(&self) -> &RcBox<T, C> {
         unsafe { self.ptr.as_ref() }
     }
+    fn inner_mut(&mut self) -> &mut RcBox<T, C> {
+        unsafe { self.ptr.as_mut() }
+    }
 
     unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
         Self { ptr }
@@ -100,7 +103,7 @@ impl<T, C: MarkerCounter> RcX<T, C> {
 
 impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     /// See [std::rc::Rc::as_ptr].
-    pub fn as_ptr(this: &Self) -> *const T {
+    fn as_ptr(this: &Self) -> *const T {
         &**this
     }
 
@@ -109,14 +112,22 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
         this.inner().strong()
     }
 
+    fn is_unique(this: &Self) -> bool {
+        Self::strong_count(&this) == C::one()
+    }
+
     /// See [std::rc::Rc::get_mut].
-    pub fn get_mut(_this: &mut Self) -> Option<&mut T> {
-        todo!();
+    pub fn get_mut(this: &mut Self) -> Option<&mut T> {
+        if Self::is_unique(this) {
+            Some(&mut this.inner_mut().value)
+        } else {
+            None
+        }
     }
 
     /// See [std::rc::Rc::ptr_eq].
-    pub fn ptr_eq(_this: &Self, _other: &Self) -> bool {
-        todo!();
+    pub fn ptr_eq(this: &Self, other: &Self) -> bool {
+        Self::as_ptr(this) == Self::as_ptr(other)
     }
 }
 
@@ -433,5 +444,29 @@ mod tests {
 
         assert_eq!(Rc8::strong_count(&rc), 255);
         // rc.clone(); // overflow
+    }
+
+    #[test]
+    fn get_mut() {
+        let mut rc = Rc8::new(1i32);
+
+        let rc2 = rc.clone();
+        assert!(Rc8::get_mut(&mut rc).is_none());
+
+        drop(rc2);
+        assert!(Rc8::get_mut(&mut rc).is_some());
+
+        *Rc8::get_mut(&mut rc).unwrap() = 2;
+        assert_eq!(*rc, 2);
+    }
+
+    #[test]
+    fn ptr_eq() {
+        let rc = Rc8::new(1i32);
+        let rc_eq = rc.clone();
+        let rc_ne = Rc8::new(1i32);
+
+        assert!(Rc8::ptr_eq(&rc, &rc_eq));
+        assert!(!Rc8::ptr_eq(&rc, &rc_ne));
     }
 }
