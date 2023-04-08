@@ -13,11 +13,3 @@ macro_rules! assume {
         };
     };
 }
-
-// NOTE
-// std::intrinsics::unlikely is unstable at this time.
-macro_rules! unlikely {
-    ($cond:expr) => {
-        $cond
-    };
-}

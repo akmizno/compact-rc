@@ -12,52 +12,54 @@ use std::pin::Pin;
 use std::ptr;
 use std::ptr::NonNull;
 
+use num::{one, CheckedAdd, CheckedSub, Unsigned};
+
 // NOTE
 // `std::rc::RcBox` uses #[repr(C)], but this does not.
 // Some methods such as `into_raw` and `from_raw` can not be implemented
 // because of field-reordering.
-struct RcBox<T: ?Sized> {
-    strong: Cell<usize>,
+struct RcBox<T: ?Sized, C> {
+    strong: Cell<C>,
     value: T,
 }
 
-impl<T: ?Sized> RcBox<T> {
-    fn strong(&self) -> usize {
+impl<T: ?Sized, C: Copy + CheckedAdd + CheckedSub + Unsigned> RcBox<T, C> {
+    fn strong(&self) -> C {
         self.strong.get()
     }
 
     fn inc_strong(&self) {
         let count = self.strong();
-        assume!(0 < count);
-        let (count, overflow) = count.overflowing_add(1);
-        self.strong.set(count);
-
-        if unlikely!(overflow) {
-            std::process::abort();
+        assume!(!count.is_zero());
+        match count.checked_add(&one()) {
+            Some(c) => self.strong.set(c),
+            None => std::process::abort(),
         }
     }
 
     fn dec_strong(&self) {
         let count = self.strong();
-        assume!(0 < count);
-        let count = count.wrapping_sub(1);
-        self.strong.set(count);
+        assume!(!count.is_zero());
+        match count.checked_sub(&one()) {
+            Some(c) => self.strong.set(c),
+            None => std::process::abort(),
+        }
     }
 }
 
 pub struct Rc<T: ?Sized> {
-    ptr: NonNull<RcBox<T>>,
+    ptr: NonNull<RcBox<T, usize>>,
 }
 
 impl<T: RefUnwindSafe + ?Sized> UnwindSafe for Rc<T> {}
 impl<T: RefUnwindSafe + ?Sized> RefUnwindSafe for Rc<T> {}
 
 impl<T: ?Sized> Rc<T> {
-    fn inner(&self) -> &RcBox<T> {
+    fn inner(&self) -> &RcBox<T, usize> {
         unsafe { self.ptr.as_ref() }
     }
 
-    unsafe fn from_inner(ptr: NonNull<RcBox<T>>) -> Self {
+    unsafe fn from_inner(ptr: NonNull<RcBox<T, usize>>) -> Self {
         Self { ptr }
     }
 }
@@ -87,7 +89,7 @@ impl<T> Rc<T> {
 impl<T: ?Sized> Rc<T> {
     /// See [std::rc::Rc::as_ptr].
     pub fn as_ptr(this: &Self) -> *const T {
-        let ptr: *mut RcBox<T> = NonNull::as_ptr(this.ptr);
+        let ptr: *mut RcBox<T, usize> = NonNull::as_ptr(this.ptr);
         unsafe { ptr::addr_of_mut!((*ptr).value) }
     }
 
