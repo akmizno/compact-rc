@@ -420,4 +420,18 @@ mod tests {
 
         assert_eq!(hash_rc, hash_hello);
     }
+
+    #[test]
+    fn max_strong_count() {
+        let rc = Rc8::new("hello".to_string());
+        assert_eq!(Rc8::strong_count(&rc), 1);
+
+        let mut v = Vec::new();
+        for _ in 0..254 {
+            v.push(rc.clone());
+        }
+
+        assert_eq!(Rc8::strong_count(&rc), 255);
+        // rc.clone(); // overflow
+    }
 }
