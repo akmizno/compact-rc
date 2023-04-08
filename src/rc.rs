@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::borrow;
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -6,6 +5,8 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter;
+use std::mem;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::ops::Sub;
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -59,6 +60,12 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
     }
 }
 
+impl<T, C: MarkerCounter> RcBox<T, C> {
+    unsafe fn as_uninit(&mut self) -> &mut RcBox<MaybeUninit<T>, C> {
+        mem::transmute(self)
+    }
+}
+
 pub struct RcX<T: ?Sized, C: MarkerCounter> {
     ptr: NonNull<RcBox<T, C>>,
 }
@@ -81,24 +88,47 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
 }
 
 impl<T, C: MarkerCounter> RcX<T, C> {
+    unsafe fn unwrap_unchecked(self) -> T {
+        assume!(RcX::is_unique(&self));
+
+        // this forgets calling RcX's destructor.
+        let mut this: ManuallyDrop<Self> = ManuallyDrop::new(self);
+
+        // uninit_rcbox prevents calling T's destructor.
+        let uninit_rcbox: &mut RcBox<MaybeUninit<T>, C> = this.ptr.as_mut().as_uninit();
+
+        // this_box deallocates its memory at the end of this function, but does not call T's destructor.
+        let _this_box: Box<RcBox<MaybeUninit<T>, C>> = Box::from_raw(uninit_rcbox);
+
+        // move out the value
+        uninit_rcbox.value.assume_init_read()
+    }
+
     /// See [std::rc::Rc::new].
     pub fn new(value: T) -> RcX<T, C> {
         unsafe {
-            Self::from_inner(NonNull::from(Box::leak(Box::new(RcBox {
-                strong: Cell::new(C::one()),
-                value,
-            }))))
+            Self::from_inner(
+                Box::leak(Box::new(RcBox {
+                    strong: Cell::new(C::one()),
+                    value,
+                }))
+                .into(),
+            )
         }
     }
 
     /// See [std::rc::Rc::pin].
-    pub fn pin(_value: T) -> Pin<RcX<T, C>> {
-        todo!();
+    pub fn pin(value: T) -> Pin<RcX<T, C>> {
+        unsafe { Pin::new_unchecked(Self::new(value)) }
     }
 
     /// See [std::rc::Rc::try_unwrap].
-    pub fn try_unwrap(_this: Self) -> Result<T, Self> {
-        todo!();
+    pub fn try_unwrap(this: Self) -> Result<T, Self> {
+        if Self::is_unique(&this) {
+            unsafe { Ok(Self::unwrap_unchecked(this)) }
+        } else {
+            Err(this)
+        }
     }
 }
 
@@ -139,13 +169,6 @@ impl<T: Clone, C: MarkerCounter> RcX<T, C> {
             *this = Self::new((**this).clone());
         }
         unsafe { Self::get_mut(this).unwrap_unchecked() }
-    }
-}
-
-impl<C: MarkerCounter> RcX<dyn Any, C> {
-    /// See [std::rc::Rc::downcast].
-    pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
-        todo!();
     }
 }
 
@@ -488,5 +511,36 @@ mod tests {
         *Rc8::make_mut(&mut rc) = 3;
         assert_eq!(*rc, 3);
         assert_eq!(*rc2, 2);
+    }
+
+    #[test]
+    fn pin() {
+        let rc = Rc8::pin(1i32);
+
+        assert_eq!(*rc, 1);
+    }
+
+    #[test]
+    fn try_unwrap() {
+        {
+            let rc = Rc8::new(1i32);
+            let v = Rc8::try_unwrap(rc);
+            assert_eq!(v.unwrap(), 1);
+        }
+
+        {
+            let rc = Rc8::new(1i32);
+            let _rc2 = rc.clone();
+            let v = Rc8::try_unwrap(rc);
+            assert_eq!(*v.unwrap_err(), 1);
+        }
+
+        {
+            let rc = Rc8::new(1i32);
+            let rc2 = rc.clone();
+            drop(rc2);
+            let v = Rc8::try_unwrap(rc);
+            assert_eq!(v.unwrap(), 1);
+        }
     }
 }
