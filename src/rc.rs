@@ -12,7 +12,10 @@ use std::pin::Pin;
 use std::ptr;
 use std::ptr::NonNull;
 
-#[repr(C)]
+// NOTE
+// `std::rc::RcBox` uses #[repr(C)], but this does not.
+// Some methods such as `into_raw` and `from_raw` can not be implemented
+// because of field-reordering.
 struct RcBox<T: ?Sized> {
     strong: Cell<usize>,
     value: T,
@@ -70,14 +73,6 @@ impl<T> Rc<T> {
         }
     }
 
-    /// See [std::rc::Rc::new_cyclic].
-    pub fn new_cyclic<F>(_data_fn: F) -> Rc<T>
-    where
-        F: FnOnce(&NonNull<T>) -> T,
-    {
-        todo!();
-    }
-
     /// See [std::rc::Rc::pin].
     pub fn pin(_value: T) -> Pin<Rc<T>> {
         todo!();
@@ -90,40 +85,15 @@ impl<T> Rc<T> {
 }
 
 impl<T: ?Sized> Rc<T> {
-    /// See [std::rc::Rc::into_raw].
-    pub fn into_raw(_this: Self) -> *const T {
-        todo!();
-    }
-
     /// See [std::rc::Rc::as_ptr].
     pub fn as_ptr(this: &Self) -> *const T {
         let ptr: *mut RcBox<T> = NonNull::as_ptr(this.ptr);
         unsafe { ptr::addr_of_mut!((*ptr).value) }
     }
 
-    /// See [std::rc::Rc::from_raw].
-    pub unsafe fn from_raw(_ptr: *const T) -> Self {
-        todo!();
-    }
-
-    /// See [std::rc::Rc::downgrade].
-    pub fn downgrade(_this: &Self) -> NonNull<T> {
-        todo!();
-    }
-
     /// See [std::rc::Rc::strong_count].
     pub fn strong_count(this: &Self) -> usize {
         this.inner().strong()
-    }
-
-    /// See [std::rc::Rc::increment_strong_count].
-    pub unsafe fn increment_strong_count(_ptr: *const T) {
-        todo!();
-    }
-
-    /// See [std::rc::Rc::decrement_strong_count].
-    pub unsafe fn decrement_strong_count(_ptr: *const T) {
-        todo!();
     }
 
     /// See [std::rc::Rc::get_mut].
