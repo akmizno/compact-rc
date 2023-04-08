@@ -9,6 +9,7 @@ use std::iter;
 use std::ops::Deref;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
+use std::ptr;
 use std::ptr::NonNull;
 
 #[repr(C)]
@@ -95,8 +96,9 @@ impl<T: ?Sized> Rc<T> {
     }
 
     /// See [std::rc::Rc::as_ptr].
-    pub fn as_ptr(_this: &Self) -> *const T {
-        todo!();
+    pub fn as_ptr(this: &Self) -> *const T {
+        let ptr: *mut RcBox<T> = NonNull::as_ptr(this.ptr);
+        unsafe { ptr::addr_of_mut!((*ptr).value) }
     }
 
     /// See [std::rc::Rc::from_raw].
@@ -208,20 +210,20 @@ impl<T: ?Sized + Hash> Hash for Rc<T> {
 }
 
 impl<T: ?Sized + fmt::Display> fmt::Display for Rc<T> {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!();
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&**self, f)
     }
 }
 
 impl<T: ?Sized + fmt::Debug> fmt::Debug for Rc<T> {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!();
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&**self, f)
     }
 }
 
 impl<T: ?Sized> fmt::Pointer for Rc<T> {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!();
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Pointer::fmt(&(Rc::as_ptr(self)), f)
     }
 }
 
@@ -308,9 +310,7 @@ impl<T: ?Sized> Unpin for Rc<T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc;
-
-    type StdRc<T> = rc::Rc<T>;
+    type StdRc<T> = std::rc::Rc<T>;
 
     #[test]
     fn new_deref() {
@@ -340,5 +340,37 @@ mod tests {
         let stdrc = StdRc::<String>::default();
 
         assert_eq!(*rc, *stdrc);
+    }
+
+    #[test]
+    fn debug() {
+        let rc = Rc::new("debug".to_string());
+        let stdrc = StdRc::new("debug".to_string());
+
+        assert_eq!(format!("{:?}", rc), format!("{:?}", stdrc));
+    }
+
+    #[test]
+    fn display() {
+        let rc = Rc::new("debug".to_string());
+        let stdrc = StdRc::new("debug".to_string());
+
+        assert_eq!(format!("{}", rc), format!("{}", stdrc));
+    }
+
+    #[test]
+    fn pointer() {
+        let rc = Rc::new("debug".to_string());
+
+        assert_eq!(format!("{:p}", rc), format!("{:p}", Rc::as_ptr(&rc)));
+    }
+
+    #[test]
+    fn as_ptr() {
+        let rc = Rc::<u32>::new(1);
+
+        unsafe {
+            assert_eq!(*Rc::as_ptr(&rc), 1);
+        }
     }
 }
