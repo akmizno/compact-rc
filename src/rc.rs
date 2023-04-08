@@ -184,28 +184,34 @@ impl<T: Default> Default for Rc<T> {
 }
 
 impl<T: ?Sized + PartialEq> PartialEq for Rc<T> {
-    fn eq(&self, _other: &Rc<T>) -> bool {
-        todo!();
+    fn eq(&self, other: &Rc<T>) -> bool {
+        // NOTE
+        // Optimization by comparing their addresses can not be used for T: PartialEq.
+        // For T: Eq, it is possible. But the specialization is unstable feature.
+        PartialEq::eq(&**self, &**other)
+    }
+    fn ne(&self, other: &Rc<T>) -> bool {
+        PartialEq::ne(&**self, &**other)
     }
 }
 
 impl<T: ?Sized + Eq> Eq for Rc<T> {}
 
 impl<T: ?Sized + PartialOrd> PartialOrd for Rc<T> {
-    fn partial_cmp(&self, _other: &Rc<T>) -> Option<Ordering> {
-        todo!();
+    fn partial_cmp(&self, other: &Rc<T>) -> Option<Ordering> {
+        PartialOrd::partial_cmp(&**self, &**other)
     }
 }
 
 impl<T: ?Sized + Ord> Ord for Rc<T> {
-    fn cmp(&self, _other: &Rc<T>) -> Ordering {
-        todo!();
+    fn cmp(&self, other: &Rc<T>) -> Ordering {
+        Ord::cmp(&**self, &**other)
     }
 }
 
 impl<T: ?Sized + Hash> Hash for Rc<T> {
-    fn hash<H: Hasher>(&self, _state: &mut H) {
-        todo!();
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Hash::hash(&**self, state)
     }
 }
 
@@ -372,5 +378,63 @@ mod tests {
         unsafe {
             assert_eq!(*Rc::as_ptr(&rc), 1);
         }
+    }
+
+    #[test]
+    fn eq_ne() {
+        let rc = Rc::<u32>::new(1);
+        let rc1 = Rc::<u32>::new(1);
+        let rc2 = Rc::<u32>::new(2);
+
+        assert_eq!(rc, rc1);
+        assert_ne!(rc, rc2);
+    }
+
+    #[test]
+    fn partial_cmp() {
+        let rc = Rc::<u32>::new(2);
+        let rc1 = Rc::<u32>::new(1);
+        let rc2 = Rc::<u32>::new(2);
+        let rc3 = Rc::<u32>::new(3);
+
+        assert_eq!(
+            PartialOrd::partial_cmp(&rc, &rc1),
+            PartialOrd::partial_cmp(&2, &1)
+        );
+        assert_eq!(
+            PartialOrd::partial_cmp(&rc, &rc2),
+            PartialOrd::partial_cmp(&2, &2)
+        );
+        assert_eq!(
+            PartialOrd::partial_cmp(&rc, &rc3),
+            PartialOrd::partial_cmp(&2, &3)
+        );
+    }
+
+    #[test]
+    fn cmp() {
+        let rc = Rc::<u32>::new(2);
+        let rc1 = Rc::<u32>::new(1);
+        let rc2 = Rc::<u32>::new(2);
+        let rc3 = Rc::<u32>::new(3);
+
+        assert_eq!(Ord::cmp(&rc, &rc1), Ord::cmp(&2, &1));
+        assert_eq!(Ord::cmp(&rc, &rc2), Ord::cmp(&2, &2));
+        assert_eq!(Ord::cmp(&rc, &rc3), Ord::cmp(&2, &3));
+    }
+
+    #[test]
+    fn hash() {
+        let rc = Rc::new("hello".to_string());
+
+        let mut h = std::collections::hash_map::DefaultHasher::default();
+        Hash::hash(&rc, &mut h);
+        let hash_rc = h.finish();
+
+        let mut h = std::collections::hash_map::DefaultHasher::default();
+        Hash::hash("hello", &mut h);
+        let hash_hello = h.finish();
+
+        assert_eq!(hash_rc, hash_hello);
     }
 }
