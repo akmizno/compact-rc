@@ -7,12 +7,13 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter;
 use std::ops::Deref;
+use std::ops::Sub;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 use std::ptr;
 use std::ptr::NonNull;
 
-use num::{one, CheckedAdd, CheckedSub, Unsigned};
+use num::{one, CheckedAdd, Unsigned};
 
 // NOTE
 // `std::rc::RcBox` uses #[repr(C)], but this does not.
@@ -23,7 +24,7 @@ struct RcBox<T: ?Sized, C> {
     value: T,
 }
 
-impl<T: ?Sized, C: Copy + CheckedAdd + CheckedSub + Unsigned> RcBox<T, C> {
+impl<T: ?Sized, C: Copy + CheckedAdd + Sub + Unsigned> RcBox<T, C> {
     fn strong(&self) -> C {
         self.strong.get()
     }
@@ -40,10 +41,8 @@ impl<T: ?Sized, C: Copy + CheckedAdd + CheckedSub + Unsigned> RcBox<T, C> {
     fn dec_strong(&self) {
         let count = self.strong();
         assume!(!count.is_zero());
-        match count.checked_sub(&one()) {
-            Some(c) => self.strong.set(c),
-            None => std::process::abort(),
-        }
+        let c = count.sub(one());
+        self.strong.set(c);
     }
 }
 
