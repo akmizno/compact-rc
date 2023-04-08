@@ -1,18 +1,22 @@
+// NOTE
+// std::intrinsics::assume is unstable at this time.
 #[macro_export]
 macro_rules! assume {
     ($cond:expr) => {
-        if cfg!(debug_assertions) {
-            debug_assert!($cond);
-        } else if !$cond {
-            unsafe {
-                std::hint::unreachable_unchecked();
+        if !$cond {
+            if cfg!(debug_assertions) {
+                unreachable!();
+            } else {
+                unsafe {
+                    std::hint::unreachable_unchecked();
+                }
             }
-        }
+        };
     };
 }
 
-// TODO
-// Use std::intrinsics::unlikeyly.
+// NOTE
+// std::intrinsics::unlikely is unstable at this time.
 #[macro_export]
 macro_rules! unlikely {
     ($cond:expr) => {
