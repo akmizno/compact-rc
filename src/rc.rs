@@ -544,3 +544,83 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod leak_ckeck {
+    use super::*;
+
+    struct DropCount<'a> {
+        drop_count: &'a mut usize,
+    }
+
+    impl<'a> Drop for DropCount<'a> {
+        fn drop(&mut self) {
+            *self.drop_count += 1;
+        }
+    }
+
+    #[test]
+    fn single() {
+        let mut drop_count = 0;
+        let rc = Rc8::new(DropCount {
+            drop_count: &mut drop_count,
+        });
+        drop(rc);
+        assert_eq!(drop_count, 1);
+    }
+
+    #[test]
+    fn clone() {
+        let mut drop_count = 0;
+        let rc = Rc8::new(DropCount {
+            drop_count: &mut drop_count,
+        });
+        let rc2 = rc.clone();
+        drop(rc);
+        drop(rc2);
+        assert_eq!(drop_count, 1);
+    }
+
+    #[test]
+    fn try_unwrap() {
+        {
+            let mut drop_count = 0;
+            {
+                let rc = Rc8::new(DropCount {
+                    drop_count: &mut drop_count,
+                });
+
+                let v = Rc8::try_unwrap(rc);
+                assert!(v.is_ok());
+            }
+            assert_eq!(drop_count, 1);
+        }
+
+        {
+            let mut drop_count = 0;
+            {
+                let rc = Rc8::new(DropCount {
+                    drop_count: &mut drop_count,
+                });
+                let _rc2 = rc.clone();
+                let v = Rc8::try_unwrap(rc);
+                assert!(v.is_err());
+            }
+            assert_eq!(drop_count, 1);
+        }
+
+        {
+            let mut drop_count = 0;
+            {
+                let rc = Rc8::new(DropCount {
+                    drop_count: &mut drop_count,
+                });
+                let rc2 = rc.clone();
+                drop(rc2);
+                let v = Rc8::try_unwrap(rc);
+                assert!(v.is_ok());
+            }
+            assert_eq!(drop_count, 1);
+        }
+    }
+}
