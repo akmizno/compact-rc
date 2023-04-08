@@ -10,7 +10,6 @@ use std::ops::Deref;
 use std::ops::Sub;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
-use std::ptr;
 use std::ptr::NonNull;
 
 use num::{one, CheckedAdd, Unsigned};
@@ -102,8 +101,7 @@ impl<T, C: MarkerCounter> RcX<T, C> {
 impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     /// See [std::rc::Rc::as_ptr].
     pub fn as_ptr(this: &Self) -> *const T {
-        let ptr: *mut RcBox<T, C> = NonNull::as_ptr(this.ptr);
-        unsafe { ptr::addr_of_mut!((*ptr).value) }
+        &**this
     }
 
     /// See [std::rc::Rc::strong_count].
