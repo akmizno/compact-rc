@@ -177,7 +177,7 @@ impl<T: ?Sized> Clone for Rc<T> {
 
 impl<T: Default> Default for Rc<T> {
     fn default() -> Rc<T> {
-        todo!();
+        Rc::new(Default::default())
     }
 }
 
@@ -308,7 +308,9 @@ impl<T: ?Sized> Unpin for Rc<T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    // use std::rc::Rc;
+    use std::rc;
+
+    type StdRc<T> = rc::Rc<T>;
 
     #[test]
     fn new_deref() {
@@ -330,5 +332,13 @@ mod tests {
         drop(rc1);
         assert_eq!(Rc::strong_count(&rc2), 1);
         assert_eq!(*rc2, 1);
+    }
+
+    #[test]
+    fn default() {
+        let rc = Rc::<String>::default();
+        let stdrc = StdRc::<String>::default();
+
+        assert_eq!(*rc, *stdrc);
     }
 }
