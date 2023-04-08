@@ -25,18 +25,18 @@ impl<T: ?Sized> RcBox<T> {
 
     fn inc_strong(&self) {
         let count = self.strong();
-        crate::assume!(0 < count);
+        assume!(0 < count);
         let (count, overflow) = count.overflowing_add(1);
         self.strong.set(count);
 
-        if crate::unlikely!(overflow) {
+        if unlikely!(overflow) {
             std::process::abort();
         }
     }
 
     fn dec_strong(&self) {
         let count = self.strong();
-        crate::assume!(0 < count);
+        assume!(0 < count);
         let count = count.wrapping_sub(1);
         self.strong.set(count);
     }

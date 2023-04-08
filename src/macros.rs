@@ -1,6 +1,5 @@
 // NOTE
 // std::intrinsics::assume is unstable at this time.
-#[macro_export]
 macro_rules! assume {
     ($cond:expr) => {
         if !$cond {
@@ -17,7 +16,6 @@ macro_rules! assume {
 
 // NOTE
 // std::intrinsics::unlikely is unstable at this time.
-#[macro_export]
 macro_rules! unlikely {
     ($cond:expr) => {
         $cond
