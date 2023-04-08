@@ -70,6 +70,7 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     fn inner(&self) -> &RcBox<T, C> {
         unsafe { self.ptr.as_ref() }
     }
+
     fn inner_mut(&mut self) -> &mut RcBox<T, C> {
         unsafe { self.ptr.as_mut() }
     }
@@ -133,8 +134,11 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
 
 impl<T: Clone, C: MarkerCounter> RcX<T, C> {
     /// See [std::rc::Rc::make_mut].
-    pub fn make_mut(_this: &mut Self) -> &mut T {
-        todo!();
+    pub fn make_mut(this: &mut Self) -> &mut T {
+        if !Self::is_unique(this) {
+            *this = Self::new((**this).clone());
+        }
+        unsafe { Self::get_mut(this).unwrap_unchecked() }
     }
 }
 
@@ -468,5 +472,21 @@ mod tests {
 
         assert!(Rc8::ptr_eq(&rc, &rc_eq));
         assert!(!Rc8::ptr_eq(&rc, &rc_ne));
+    }
+
+    #[test]
+    fn make_mut() {
+        let mut rc = Rc8::new(1i32);
+        assert_eq!(*rc, 1);
+
+        *Rc8::make_mut(&mut rc) = 2;
+        assert_eq!(*rc, 2);
+
+        let rc2 = rc.clone();
+        assert_eq!(*rc2, 2);
+
+        *Rc8::make_mut(&mut rc) = 3;
+        assert_eq!(*rc, 3);
+        assert_eq!(*rc2, 2);
     }
 }
