@@ -11,22 +11,62 @@ use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 use std::ptr::NonNull;
 
+#[repr(C)]
 struct RcBox<T: ?Sized> {
-    _strong: Cell<usize>,
-    _value: T,
+    strong: Cell<usize>,
+    value: T,
+}
+
+impl<T: ?Sized> RcBox<T> {
+    fn strong(&self) -> usize {
+        self.strong.get()
+    }
+
+    fn inc_strong(&self) {
+        let count = self.strong();
+        crate::assume!(0 < count);
+        let (count, overflow) = count.overflowing_add(1);
+        self.strong.set(count);
+
+        if crate::unlikely!(overflow) {
+            std::process::abort();
+        }
+    }
+
+    fn dec_strong(&self) {
+        let count = self.strong();
+        crate::assume!(0 < count);
+        let count = count.wrapping_sub(1);
+        self.strong.set(count);
+    }
 }
 
 pub struct Rc<T: ?Sized> {
-    _ptr: NonNull<RcBox<T>>,
+    ptr: NonNull<RcBox<T>>,
 }
 
 impl<T: RefUnwindSafe + ?Sized> UnwindSafe for Rc<T> {}
 impl<T: RefUnwindSafe + ?Sized> RefUnwindSafe for Rc<T> {}
 
+impl<T: ?Sized> Rc<T> {
+    fn inner(&self) -> &RcBox<T> {
+        unsafe { self.ptr.as_ref() }
+    }
+
+    unsafe fn from_inner(ptr: NonNull<RcBox<T>>) -> Self {
+        Self { ptr }
+    }
+}
+
 impl<T> Rc<T> {
     /// See [std::rc::Rc::new].
-    pub fn new(_value: T) -> Rc<T> {
-        todo!();
+    pub fn new(value: T) -> Rc<T> {
+        unsafe {
+            Self::from_inner(NonNull::from(Box::leak(Box::new(RcBox {
+                strong: Cell::new(1),
+                value,
+            }))))
+        }
     }
 
     /// See [std::rc::Rc::new_cyclic].
@@ -70,8 +110,8 @@ impl<T: ?Sized> Rc<T> {
     }
 
     /// See [std::rc::Rc::strong_count].
-    pub fn strong_count(_this: &Self) -> usize {
-        todo!();
+    pub fn strong_count(this: &Self) -> usize {
+        this.inner().strong()
     }
 
     /// See [std::rc::Rc::increment_strong_count].
@@ -113,19 +153,25 @@ impl<T: ?Sized> Deref for Rc<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        todo!();
+        &self.inner().value
     }
 }
 
 impl<T: ?Sized> Drop for Rc<T> {
     fn drop(&mut self) {
-        todo!();
+        self.inner().dec_strong();
+        if self.inner().strong() == 0 {
+            unsafe {
+                drop(Box::from_raw(self.ptr.as_mut()));
+            }
+        }
     }
 }
 
 impl<T: ?Sized> Clone for Rc<T> {
     fn clone(&self) -> Rc<T> {
-        todo!();
+        self.inner().inc_strong();
+        unsafe { Self::from_inner(self.ptr) }
     }
 }
 
@@ -261,9 +307,28 @@ impl<T: ?Sized> Unpin for Rc<T> {}
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::*;
     // use std::rc::Rc;
 
     #[test]
-    fn it_works() {}
+    fn new_deref() {
+        let rc = Rc::new(1);
+        assert_eq!(*rc, 1);
+    }
+
+    #[test]
+    fn clone_drop_strong_count() {
+        let rc1 = Rc::new(1);
+        assert_eq!(Rc::strong_count(&rc1), 1);
+
+        let rc2 = rc1.clone();
+        assert_eq!(Rc::strong_count(&rc1), 2);
+        assert_eq!(Rc::strong_count(&rc2), 2);
+        assert_eq!(*rc1, 1);
+        assert_eq!(*rc2, 1);
+
+        drop(rc1);
+        assert_eq!(Rc::strong_count(&rc2), 1);
+        assert_eq!(*rc2, 1);
+    }
 }
