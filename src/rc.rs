@@ -255,8 +255,8 @@ impl<T: ?Sized, C: MarkerCounter> fmt::Pointer for RcX<T, C> {
 }
 
 impl<T, C: MarkerCounter> From<T> for RcX<T, C> {
-    fn from(_t: T) -> Self {
-        todo!();
+    fn from(t: T) -> Self {
+        Self::new(t)
     }
 }
 
@@ -322,13 +322,13 @@ impl<T, C: MarkerCounter> iter::FromIterator<T> for RcX<[T], C> {
 
 impl<T: ?Sized, C: MarkerCounter> borrow::Borrow<T> for RcX<T, C> {
     fn borrow(&self) -> &T {
-        todo!();
+        &**self
     }
 }
 
 impl<T: ?Sized, C: MarkerCounter> AsRef<T> for RcX<T, C> {
     fn as_ref(&self) -> &T {
-        todo!();
+        &**self
     }
 }
 
@@ -337,6 +337,7 @@ impl<T: ?Sized, C: MarkerCounter> Unpin for RcX<T, C> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Borrow;
     type StdRc<T> = std::rc::Rc<T>;
 
     #[test]
@@ -542,6 +543,28 @@ mod tests {
             let v = Rc8::try_unwrap(rc);
             assert_eq!(v.unwrap(), 1);
         }
+    }
+
+    #[test]
+    fn borrow() {
+        let rc = Rc8::<i32>::new(1i32);
+
+        assert_eq!(<Rc8<i32> as Borrow<i32>>::borrow(&rc), &1i32);
+    }
+
+    #[test]
+    fn as_ref() {
+        let rc = Rc8::<i32>::new(1i32);
+
+        assert_eq!(rc.as_ref(), &1i32);
+    }
+
+    #[test]
+    fn from_t() {
+        let value: String = "hello".to_string();
+        let rc = Rc8::<String>::from(value);
+
+        assert_eq!(*rc, "hello");
     }
 }
 
