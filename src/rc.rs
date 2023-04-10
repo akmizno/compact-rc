@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter;
+use std::marker::PhantomData;
 use std::mem;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
@@ -68,6 +69,10 @@ impl<T, C: MarkerCounter> RcBox<T, C> {
 
 pub struct RcX<T: ?Sized, C: MarkerCounter> {
     ptr: NonNull<RcBox<T, C>>,
+
+    // NOTE PhantomData for dropck.
+    // This field indicates that this struct owns the data of type RcBox<T, C>.
+    _phantom: PhantomData<RcBox<T, C>>,
 }
 
 impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> UnwindSafe for RcX<T, C> {}
@@ -83,7 +88,10 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     }
 
     unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
-        Self { ptr }
+        Self {
+            ptr,
+            _phantom: PhantomData,
+        }
     }
 }
 
