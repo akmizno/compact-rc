@@ -147,8 +147,42 @@ impl<T, C: MarkerCounter> RcX<T, C> {
 
 impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     /// See [std::rc::Rc::as_ptr].
-    fn as_ptr(this: &Self) -> *const T {
-        &**this
+    pub fn as_ptr(this: &Self) -> *const T {
+        // The value should be initialized.
+        unsafe { &(*NonNull::as_ptr(this.ptr)).value }
+    }
+
+    /// See [std::rc::Rc::into_raw].
+    pub fn into_raw(this: Self) -> *const T {
+        let ptr = Self::as_ptr(&this);
+        mem::forget(this);
+        ptr
+    }
+
+    /// See [std::rc::Rc::from_raw].
+    pub unsafe fn from_raw(ptr: *const T) -> Self {
+        assume!(!ptr.is_null());
+
+        let offset = RcBox::<T, C>::offset_of_value(&*ptr);
+
+        // NOTE
+        // A pointer to pointer is used to deal with dynamically sized types;
+        // I *assume* that the ptr is a fat pointer consists of two parts, address and size,
+        // like (address: usize, size: usize).
+        let pptr = &ptr as *const *const T;
+
+        // Reinterpret the pptr as pointer to (usize, usize).
+        // Then change its address part.
+        // The size part should not be referenced by this code.
+        let dst_pptr = pptr as *mut (usize, usize);
+        let address: &mut usize = &mut (*dst_pptr).0;
+        assume!(offset <= *address);
+        *address -= offset;
+
+        // Reinterpret the pptr as pointer to pointer to RcBox.
+        let raw_pptr = pptr as *const *mut RcBox<T, C>;
+
+        Self::from_inner(NonNull::new(*raw_pptr).unwrap_unchecked())
     }
 
     /// See [std::rc::Rc::strong_count].
@@ -579,6 +613,50 @@ mod tests {
 
         assert_eq!(*rc, "hello");
     }
+
+    #[test]
+    fn into_raw() {
+        let rc = Rc8::<i32>::new(1i32);
+        let ptr = Rc8::as_ptr(&rc);
+
+        let raw = Rc8::into_raw(rc);
+        assert_eq!(raw, ptr);
+
+        unsafe { Rc8::from_raw(raw) };
+    }
+
+    #[test]
+    fn from_raw() {
+        let rc = Rc8::<i32>::new(1i32);
+        let ptr = Rc8::as_ptr(&rc);
+
+        let raw = Rc8::into_raw(rc);
+        assert_eq!(raw, ptr);
+
+        let rc2 = unsafe { Rc8::from_raw(raw) };
+        let ptr2 = Rc8::as_ptr(&rc2);
+        assert_eq!(ptr, ptr2);
+        assert_eq!(*rc2, 1);
+    }
+
+    // #[test]
+    // fn from_raw_dst() {
+    //     let rc = Rc8::<[i64]>::from(vec![0, 1, 2, 3, 4]);
+    //     let ptr = Rc8::as_ptr(&rc);
+
+    //     let raw = Rc8::into_raw(rc);
+    //     assert_eq!(raw, ptr);
+
+    //     let rc2 = unsafe { Rc8::from_raw(raw) };
+    //     let ptr2 = Rc8::as_ptr(&rc2);
+    //     assert_eq!(ptr, ptr2);
+    //     assert_eq!(rc2.len(), 5);
+    //     assert_eq!(rc2[0], 0);
+    //     assert_eq!(rc2[1], 1);
+    //     assert_eq!(rc2[2], 2);
+    //     assert_eq!(rc2[3], 3);
+    //     assert_eq!(rc2[4], 4);
+    // }
 }
 
 #[cfg(test)]
