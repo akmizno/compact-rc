@@ -1,3 +1,4 @@
+use std::alloc::Layout;
 use std::borrow;
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -30,10 +31,7 @@ pub type Rc32<T> = RcX<T, u32>;
 pub type Rc64<T> = RcX<T, u64>;
 pub type Rc<T> = RcX<T, usize>;
 
-// NOTE
-// `std::rc::RcBox` uses #[repr(C)], but this does not.
-// Some methods such as `into_raw` and `from_raw` can not be implemented
-// because of field-reordering.
+#[repr(C)]
 struct RcBox<T: ?Sized, C> {
     strong: Cell<C>,
     value: T,
@@ -58,6 +56,13 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
         assume!(!count.is_zero());
         let c = count.sub(one());
         self.strong.set(c);
+    }
+
+    unsafe fn offset_of_value(value: &T) -> usize {
+        let layout_strong = Layout::new::<C>();
+        let layout_value = Layout::for_value(value);
+
+        layout_strong.extend(layout_value).unwrap_unchecked().1
     }
 }
 
@@ -652,6 +657,137 @@ mod leak_ckeck {
                 assert!(v.is_ok());
             }
             assert_eq!(drop_count, 1);
+        }
+    }
+}
+#[cfg(test)]
+mod rcbox {
+    use super::*;
+
+    #[test]
+    fn offset_of_value() {
+        unsafe {
+            assert_eq!(1, RcBox::<u8, u8>::offset_of_value(&0));
+            assert_eq!(2, RcBox::<u8, u16>::offset_of_value(&0));
+            assert_eq!(4, RcBox::<u8, u32>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u8, u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u8, usize>::offset_of_value(&0));
+        }
+
+        unsafe {
+            assert_eq!(2, RcBox::<u16, u8>::offset_of_value(&0));
+            assert_eq!(2, RcBox::<u16, u16>::offset_of_value(&0));
+            assert_eq!(4, RcBox::<u16, u32>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u16, u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u16, usize>::offset_of_value(&0));
+        }
+
+        unsafe {
+            assert_eq!(4, RcBox::<u32, u8>::offset_of_value(&0));
+            assert_eq!(4, RcBox::<u32, u16>::offset_of_value(&0));
+            assert_eq!(4, RcBox::<u32, u32>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u32, u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u32, usize>::offset_of_value(&0));
+        }
+
+        unsafe {
+            assert_eq!(8, RcBox::<u64, u8>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u64, u16>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u64, u32>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u64, u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<u64, usize>::offset_of_value(&0));
+        }
+
+        unsafe {
+            assert_eq!(8, RcBox::<usize, u8>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<usize, u16>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<usize, u32>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<usize, u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox::<usize, usize>::offset_of_value(&0));
+        }
+
+        unsafe {
+            assert_eq!(2, RcBox::<(u8, u16), u8>::offset_of_value(&(0, 0)));
+            assert_eq!(2, RcBox::<(u8, u16), u16>::offset_of_value(&(0, 0)));
+            assert_eq!(4, RcBox::<(u8, u16), u32>::offset_of_value(&(0, 0)));
+            assert_eq!(8, RcBox::<(u8, u16), u64>::offset_of_value(&(0, 0)));
+            assert_eq!(8, RcBox::<(u8, u16), usize>::offset_of_value(&(0, 0)));
+        }
+    }
+
+    #[test]
+    fn offset_of_value_unsized() {
+        // slice
+        unsafe {
+            let value = [0, 1, 2, 3];
+            assert_eq!(1, RcBox::<[u8], u8>::offset_of_value(&value));
+            assert_eq!(2, RcBox::<[u8], u16>::offset_of_value(&value));
+            assert_eq!(4, RcBox::<[u8], u32>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u8], u64>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u8], usize>::offset_of_value(&value));
+        }
+
+        // slice
+        unsafe {
+            let value = [0, 1, 2, 3];
+            assert_eq!(2, RcBox::<[u16], u8>::offset_of_value(&value));
+            assert_eq!(2, RcBox::<[u16], u16>::offset_of_value(&value));
+            assert_eq!(4, RcBox::<[u16], u32>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u16], u64>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u16], usize>::offset_of_value(&value));
+        }
+
+        // slice
+        unsafe {
+            let value = [0, 1, 2, 3];
+            assert_eq!(4, RcBox::<[u32], u8>::offset_of_value(&value));
+            assert_eq!(4, RcBox::<[u32], u16>::offset_of_value(&value));
+            assert_eq!(4, RcBox::<[u32], u32>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u32], u64>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u32], usize>::offset_of_value(&value));
+        }
+
+        // slice
+        unsafe {
+            let value = [0, 1, 2, 3];
+            assert_eq!(8, RcBox::<[u64], u8>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u64], u16>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u64], u32>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u64], u64>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[u64], usize>::offset_of_value(&value));
+        }
+
+        // slice
+        unsafe {
+            let value = [0, 1, 2, 3];
+            assert_eq!(8, RcBox::<[usize], u8>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[usize], u16>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[usize], u32>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[usize], u64>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<[usize], usize>::offset_of_value(&value));
+        }
+
+        // str
+        unsafe {
+            let value = "Hello";
+            assert_eq!(1, RcBox::<str, u8>::offset_of_value(value));
+            assert_eq!(2, RcBox::<str, u16>::offset_of_value(value));
+            assert_eq!(4, RcBox::<str, u32>::offset_of_value(value));
+            assert_eq!(8, RcBox::<str, u64>::offset_of_value(value));
+            assert_eq!(8, RcBox::<str, usize>::offset_of_value(value));
+        }
+
+        // trait object
+        unsafe {
+            trait MyTrait {}
+            struct MyStruct(u32);
+            impl MyTrait for MyStruct {}
+            let value = MyStruct(0);
+            assert_eq!(4, RcBox::<dyn MyTrait, u8>::offset_of_value(&value));
+            assert_eq!(4, RcBox::<dyn MyTrait, u16>::offset_of_value(&value));
+            assert_eq!(4, RcBox::<dyn MyTrait, u32>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<dyn MyTrait, u64>::offset_of_value(&value));
+            assert_eq!(8, RcBox::<dyn MyTrait, usize>::offset_of_value(&value));
         }
     }
 }
