@@ -59,6 +59,8 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
     }
 
     unsafe fn offset_of_value(value: &T) -> usize {
+        // FIXME This function should be `const fn`.
+
         let layout_strong = Layout::new::<C>();
         let layout_value = Layout::for_value(value);
 
@@ -165,21 +167,22 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
 
         let offset = RcBox::<T, C>::offset_of_value(&*ptr);
 
-        // NOTE
+        // FIXME Following implementation should be rewritten using pointer_byte_offsets APIs in the future.
+
         // A pointer to pointer is used to deal with dynamically sized types;
-        // I *assume* that the ptr is a fat pointer consists of two parts, address and size,
-        // like (address: usize, size: usize).
+        // This code *assume* that the ptr is a fat pointer consists of two parts,
+        // address and metadata, like (address: usize, metadata: usize).
         let pptr = &ptr as *const *const T;
 
-        // Reinterpret the pptr as pointer to (usize, usize).
+        // Reinterpret the pptr as a pointer to (usize, usize).
         // Then change its address part.
-        // The size part should not be referenced by this code.
+        // The metadata part should not be used by this code.
         let dst_pptr = pptr as *mut (usize, usize);
         let address: &mut usize = &mut (*dst_pptr).0;
         assume!(offset <= *address);
         *address -= offset;
 
-        // Reinterpret the pptr as pointer to pointer to RcBox.
+        // Reinterpret the pptr as a pointer to pointer to RcBox.
         let raw_pptr = pptr as *const *mut RcBox<T, C>;
 
         Self::from_inner(NonNull::new(*raw_pptr).unwrap_unchecked())
