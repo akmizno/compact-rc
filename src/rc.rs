@@ -350,14 +350,15 @@ impl<T: Clone, C: MarkerCounter> From<&[T]> for RcX<[T], C> {
 }
 
 impl<C: MarkerCounter> From<&str> for RcX<str, C> {
-    fn from(_v: &str) -> RcX<str, C> {
-        todo!();
+    fn from(v: &str) -> RcX<str, C> {
+        let rc = RcX::<[u8], C>::from(v.as_bytes());
+        unsafe { RcX::from_raw(RcX::into_raw(rc) as *const str) }
     }
 }
 
 impl<C: MarkerCounter> From<String> for RcX<str, C> {
-    fn from(_v: String) -> RcX<str, C> {
-        todo!();
+    fn from(v: String) -> RcX<str, C> {
+        RcX::from(v.as_ref())
     }
 }
 
@@ -397,8 +398,8 @@ where
 }
 
 impl<C: MarkerCounter> From<RcX<str, C>> for RcX<[u8], C> {
-    fn from(_rc: RcX<str, C>) -> Self {
-        todo!();
+    fn from(rc: RcX<str, C>) -> Self {
+        unsafe { RcX::from_raw(RcX::into_raw(rc) as *const [u8]) }
     }
 }
 
@@ -730,6 +731,36 @@ mod tests {
         assert_eq!(rc[2], 2);
         assert_eq!(rc[3], 3);
         assert_eq!(rc[4], 4);
+    }
+
+    #[test]
+    fn from_str() {
+        let s = "Hello";
+        let rc = Rc8::<str>::from(s);
+        assert_eq!(rc.len(), 5);
+        assert_eq!(&*rc, "Hello");
+    }
+
+    #[test]
+    fn from_string() {
+        let s = "Hello".to_string();
+        let rc = Rc8::<str>::from(s);
+        assert_eq!(rc.len(), 5);
+        assert_eq!(&*rc, "Hello");
+    }
+
+    #[test]
+    fn str_to_slice() {
+        let s = "Hello";
+        let rc_str = Rc8::<str>::from(s);
+        let rc_slice = Rc8::<[u8]>::from(rc_str);
+
+        assert_eq!(rc_slice.len(), 5);
+        assert_eq!(rc_slice[0], b'H');
+        assert_eq!(rc_slice[1], b'e');
+        assert_eq!(rc_slice[2], b'l');
+        assert_eq!(rc_slice[3], b'l');
+        assert_eq!(rc_slice[4], b'o');
     }
 }
 
