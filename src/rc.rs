@@ -58,25 +58,66 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
         self.strong.set(c);
     }
 
-    unsafe fn layout(layout_value: Layout) -> Result<(Layout, usize), LayoutError> {
+    unsafe fn layout_nopad(layout_value: Layout) -> Result<(Layout, usize), LayoutError> {
         let layout_strong = Layout::new::<C>();
         layout_strong.extend(layout_value)
     }
 
-    unsafe fn offset_of_value(value: &T) -> usize {
+    unsafe fn layout_nopad_for_value(value: &T) -> Result<(Layout, usize), LayoutError> {
         let layout_value = Layout::for_value(value);
-        Self::layout(layout_value).unwrap().1
+        Self::layout_nopad(layout_value)
+    }
+
+    unsafe fn offset_of_value(value: &T) -> usize {
+        Self::layout_nopad_for_value(value).unwrap().1
+    }
+
+    /// Allocate and initialize an RcBox from a raw pointer.
+    ///
+    /// Returns a pointer to the allocated RcBox;
+    /// its contents are copied from the ptr, and counter initialized.
+    unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
+        let (layout, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
+        let nopad_size = layout.size();
+        let tp = std::alloc::alloc(layout.pad_to_align());
+        let tp = NonNull::new(tp).unwrap();
+        let pvalue = tp.as_ptr().add(offset);
+
+        // Copy contents.
+        let copy_size = nopad_size - offset;
+        std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue, copy_size);
+
+        // FIXME Following implementation should be rewritten in the future.
+        // Fat pointer; dummy address and valid metadata.
+        let pret = ptr.clone();
+        // Change its address part to allocated address.
+        {
+            let ppret = &pret as *const *const T;
+            // Reinterpret the ppret as a pointer to (usize, usize).
+            // Then change its address part.
+            // The metadata part should not be used by this code.
+            let dst_ppret = ppret as *mut (usize, usize);
+            let address: &mut usize = &mut (*dst_ppret).0;
+            *address = tp.as_ptr() as usize;
+        }
+
+        // cast
+        let pbox = pret as *mut RcBox<T, C>;
+        let mut pbox = NonNull::new(pbox).unwrap_unchecked();
+        std::ptr::write(&mut pbox.as_mut().strong, Cell::new(C::one()));
+
+        pbox
     }
 }
 
 impl<T, C: MarkerCounter> RcBox<T, C> {
     /// Allocate an RcBox with the given length.
     ///
-    /// Returns a pointer to the allocated RcBox;
-    /// its values are uninitialized, but counter initialized.
+    /// Returns a pointer to the allocated RcBox.
+    /// Its values are uninitialized, but counter initialized.
     unsafe fn allocate_for_slice(len: usize) -> NonNull<RcBox<[MaybeUninit<T>], C>> {
         let layout_value = Layout::array::<T>(len).unwrap();
-        let (layout, _) = Self::layout(layout_value).unwrap();
+        let (layout, _) = Self::layout_nopad(layout_value).unwrap();
         let tp = std::alloc::alloc(layout);
         let mut tp = NonNull::new(tp).unwrap();
         // Convert thin pointer to fat pointer.
@@ -110,6 +151,11 @@ pub struct RcX<T: ?Sized, C: MarkerCounter> {
 impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> UnwindSafe for RcX<T, C> {}
 impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> RefUnwindSafe for RcX<T, C> {}
 
+/// Deallocate the box without dropping its contents
+unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
+    let _drop = Box::from_raw(Box::into_raw(v) as *mut ManuallyDrop<T>);
+}
+
 impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     fn inner(&self) -> &RcBox<T, C> {
         unsafe { self.ptr.as_ref() }
@@ -124,6 +170,15 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
             ptr,
             _phantom: PhantomData,
         }
+    }
+
+    unsafe fn from_box(v: Box<T>) -> RcX<T, C> {
+        let ptr = v.as_ref() as *const T;
+        let inner = RcBox::<T, C>::alloc_copy_from_ptr(ptr);
+
+        deallocate_box(v);
+
+        RcX::from_inner(inner)
     }
 }
 
@@ -363,8 +418,8 @@ impl<C: MarkerCounter> From<String> for RcX<str, C> {
 }
 
 impl<T: ?Sized, C: MarkerCounter> From<Box<T>> for RcX<T, C> {
-    fn from(_v: Box<T>) -> RcX<T, C> {
-        todo!();
+    fn from(v: Box<T>) -> RcX<T, C> {
+        unsafe { RcX::from_box(v) }
     }
 }
 
@@ -392,8 +447,11 @@ where
     B: ToOwned + ?Sized,
     RcX<B, C>: From<&'a B> + From<B::Owned>,
 {
-    fn from(_cow: Cow<'a, B>) -> RcX<B, C> {
-        todo!();
+    fn from(cow: Cow<'a, B>) -> RcX<B, C> {
+        match cow {
+            Cow::Borrowed(s) => RcX::from(s),
+            Cow::Owned(s) => RcX::from(s),
+        }
     }
 }
 
@@ -406,8 +464,12 @@ impl<C: MarkerCounter> From<RcX<str, C>> for RcX<[u8], C> {
 impl<T, C: MarkerCounter, const N: usize> TryFrom<RcX<[T], C>> for RcX<[T; N], C> {
     type Error = RcX<[T], C>;
 
-    fn try_from(_boxed_slice: RcX<[T], C>) -> Result<Self, Self::Error> {
-        todo!();
+    fn try_from(boxed_slice: RcX<[T], C>) -> Result<Self, Self::Error> {
+        if boxed_slice.len() == N {
+            Ok(unsafe { RcX::from_raw(RcX::into_raw(boxed_slice) as *mut [T; N]) })
+        } else {
+            Err(boxed_slice)
+        }
     }
 }
 
@@ -762,6 +824,79 @@ mod tests {
         assert_eq!(rc_slice[3], b'l');
         assert_eq!(rc_slice[4], b'o');
     }
+
+    #[test]
+    fn from_box() {
+        let b = Box::<str>::from("Hello");
+        let rc = Rc8::<str>::from(b);
+        assert_eq!(&*rc, "Hello");
+    }
+
+    #[test]
+    fn from_large_box() {
+        let v = (0..1000).collect::<Vec<_>>();
+        let b = v.into_boxed_slice();
+        let rc = Rc8::<[i64]>::from(b);
+        assert_eq!(rc.len(), 1000);
+        for i in 0..1000 {
+            assert_eq!(rc[i], i as i64);
+        }
+    }
+
+    #[test]
+    fn from_cow() {
+        // Owned
+        {
+            let v = "Hello".to_string();
+            let owned: Cow<str> = Cow::Owned(v);
+            assert!(matches!(owned, Cow::Owned(_)));
+            let rc = Rc8::<str>::from(owned);
+            assert_eq!(&*rc, "Hello");
+        }
+
+        // Borrowed
+        {
+            let v = "Hello";
+            let borrowed: Cow<str> = Cow::Borrowed(v);
+            assert!(matches!(borrowed, Cow::Borrowed(_)));
+            let rc = Rc8::<str>::from(borrowed);
+            assert_eq!(&*rc, "Hello");
+        }
+    }
+
+    #[test]
+    fn try_from() {
+        let data = [0, 1, 2, 3, 4];
+        {
+            let rc_slice3 = Rc8::<[i64]>::from(&data[1..4]);
+            let rc1 = Rc8::<[i64; 1]>::try_from(rc_slice3);
+            assert!(rc1.is_err());
+        }
+        {
+            let rc_slice3 = Rc8::<[i64]>::from(&data[1..4]);
+            let rc = Rc8::<[i64; 2]>::try_from(rc_slice3);
+            assert!(rc.is_err());
+        }
+        {
+            let rc_slice3 = Rc8::<[i64]>::from(&data[1..4]);
+            let rc = Rc8::<[i64; 3]>::try_from(rc_slice3);
+            assert!(rc.is_ok());
+            let rc = rc.unwrap();
+            assert_eq!(rc[0], 1);
+            assert_eq!(rc[1], 2);
+            assert_eq!(rc[2], 3);
+        }
+        {
+            let rc_slice3 = Rc8::<[i64]>::from(&data[1..4]);
+            let rc = Rc8::<[i64; 4]>::try_from(rc_slice3);
+            assert!(rc.is_err());
+        }
+        {
+            let rc_slice3 = Rc8::<[i64]>::from(&data[1..4]);
+            let rc = Rc8::<[i64; 5]>::try_from(rc_slice3);
+            assert!(rc.is_err());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -839,6 +974,15 @@ mod leak_ckeck {
             }
             assert_eq!(drop_count, 1);
         }
+    }
+
+    #[test]
+    fn from_box() {
+        let mut drop_count = 0;
+        let b = Box::new(DropCount::new(&mut drop_count));
+        let rc = Rc8::<DropCount>::from(b);
+        drop(rc);
+        assert_eq!(drop_count, 1);
     }
 
     #[test]
