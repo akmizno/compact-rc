@@ -140,7 +140,7 @@ impl<T, C: MarkerCounter> RcX<T, C> {
         // this_box deallocates its memory at the end of this function, but does not call T's destructor.
         let _this_box: Box<RcBox<MaybeUninit<T>, C>> = Box::from_raw(uninit_rcbox);
 
-        // move out the value
+        // move the value
         uninit_rcbox.value.assume_init_read()
     }
 
@@ -738,10 +738,7 @@ mod leak_ckeck {
         {
             let mut drop_count = 0;
             {
-                let rc = Rc8::new(DropCount {
-                    drop_count: &mut drop_count,
-                });
-
+                let rc = Rc8::new(DropCount::new(&mut drop_count));
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_ok());
             }
@@ -751,9 +748,7 @@ mod leak_ckeck {
         {
             let mut drop_count = 0;
             {
-                let rc = Rc8::new(DropCount {
-                    drop_count: &mut drop_count,
-                });
+                let rc = Rc8::new(DropCount::new(&mut drop_count));
                 let _rc2 = rc.clone();
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_err());
@@ -764,9 +759,7 @@ mod leak_ckeck {
         {
             let mut drop_count = 0;
             {
-                let rc = Rc8::new(DropCount {
-                    drop_count: &mut drop_count,
-                });
+                let rc = Rc8::new(DropCount::new(&mut drop_count));
                 let rc2 = rc.clone();
                 drop(rc2);
                 let v = Rc8::try_unwrap(rc);
