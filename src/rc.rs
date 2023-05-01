@@ -336,8 +336,16 @@ impl<T, C: MarkerCounter> From<T> for RcX<T, C> {
 }
 
 impl<T: Clone, C: MarkerCounter> From<&[T]> for RcX<[T], C> {
-    fn from(_v: &[T]) -> RcX<[T], C> {
-        todo!();
+    fn from(v: &[T]) -> RcX<[T], C> {
+        unsafe {
+            let mut pbox = RcBox::<T, C>::allocate_for_slice(v.len());
+            let pvalue = &mut pbox.as_mut().value as *mut [MaybeUninit<T>];
+            assume!((*pvalue).len() == v.len());
+            for i in 0..v.len() {
+                *(*pvalue).get_unchecked_mut(i) = MaybeUninit::new(v.get_unchecked(i).clone());
+            }
+            Self::from_inner(RcBox::assume_init_slice(pbox))
+        }
     }
 }
 
@@ -704,6 +712,18 @@ mod tests {
     #[test]
     fn from_iter() {
         let rc = Rc8::<[i64]>::from_iter(0..5);
+        assert_eq!(rc.len(), 5);
+        assert_eq!(rc[0], 0);
+        assert_eq!(rc[1], 1);
+        assert_eq!(rc[2], 2);
+        assert_eq!(rc[3], 3);
+        assert_eq!(rc[4], 4);
+    }
+
+    #[test]
+    fn from_slice() {
+        let data = [0, 1, 2, 3, 4];
+        let rc = Rc8::<[i64]>::from(&data[..]);
         assert_eq!(rc.len(), 5);
         assert_eq!(rc[0], 0);
         assert_eq!(rc[1], 1);

@@ -6,6 +6,7 @@ macro_rules! assume {
             if cfg!(debug_assertions) {
                 unreachable!();
             } else {
+                #[allow(unused_unsafe)]
                 unsafe {
                     std::hint::unreachable_unchecked();
                 }
