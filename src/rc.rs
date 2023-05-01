@@ -1,4 +1,4 @@
-use std::alloc::Layout;
+use std::alloc::{Layout, LayoutError};
 use std::borrow;
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -58,13 +58,38 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
         self.strong.set(c);
     }
 
-    unsafe fn offset_of_value(value: &T) -> usize {
-        // FIXME This function should be `const fn`.
-
+    unsafe fn layout(layout_value: Layout) -> Result<(Layout, usize), LayoutError> {
         let layout_strong = Layout::new::<C>();
-        let layout_value = Layout::for_value(value);
+        layout_strong.extend(layout_value)
+    }
 
-        layout_strong.extend(layout_value).unwrap_unchecked().1
+    unsafe fn offset_of_value(value: &T) -> usize {
+        let layout_value = Layout::for_value(value);
+        Self::layout(layout_value).unwrap().1
+    }
+}
+
+impl<T, C: MarkerCounter> RcBox<T, C> {
+    /// Allocate an RcBox with the given length.
+    ///
+    /// Returns a pointer to the allocated RcBox;
+    /// its values are uninitialized, but counter initialized.
+    unsafe fn allocate_for_slice(len: usize) -> NonNull<RcBox<[MaybeUninit<T>], C>> {
+        let layout_value = Layout::array::<T>(len).unwrap();
+        let (layout, _) = Self::layout(layout_value).unwrap();
+        let tp = std::alloc::alloc(layout);
+        let mut tp = NonNull::new(tp).unwrap();
+        // Convert thin pointer to fat pointer.
+        let fp = std::ptr::slice_from_raw_parts_mut(tp.as_mut(), len);
+        let pbox = fp as *mut RcBox<[MaybeUninit<T>], C>;
+        let mut pbox = NonNull::new(pbox).unwrap_unchecked();
+        std::ptr::write(&mut pbox.as_mut().strong, Cell::new(C::one()));
+        pbox
+    }
+    unsafe fn assume_init_slice(
+        ptr: NonNull<RcBox<[MaybeUninit<T>], C>>,
+    ) -> NonNull<RcBox<[T], C>> {
+        NonNull::new(ptr.as_ptr() as *mut RcBox<[T], C>).unwrap_unchecked()
     }
 }
 
@@ -335,8 +360,21 @@ impl<T: ?Sized, C: MarkerCounter> From<Box<T>> for RcX<T, C> {
 }
 
 impl<T, C: MarkerCounter> From<Vec<T>> for RcX<[T], C> {
-    fn from(mut _v: Vec<T>) -> RcX<[T], C> {
-        todo!();
+    fn from(mut v: Vec<T>) -> RcX<[T], C> {
+        unsafe {
+            let mut pbox = RcBox::<T, C>::allocate_for_slice(v.len());
+            let pvalue = &mut pbox.as_mut().value as *mut [MaybeUninit<T>];
+            std::ptr::copy_nonoverlapping(
+                v.as_ptr() as *const MaybeUninit<T>,
+                pvalue as *mut MaybeUninit<T>,
+                v.len(),
+            );
+
+            // Prevent calling T's destructors.
+            v.set_len(0);
+
+            Self::from_inner(RcBox::assume_init_slice(pbox))
+        }
     }
 }
 
@@ -642,24 +680,16 @@ mod tests {
         assert_eq!(*rc2, 1);
     }
 
-    // #[test]
-    // fn from_raw_dst() {
-    //     let rc = Rc8::<[i64]>::from(vec![0, 1, 2, 3, 4]);
-    //     let ptr = Rc8::as_ptr(&rc);
-
-    //     let raw = Rc8::into_raw(rc);
-    //     assert_eq!(raw, ptr);
-
-    //     let rc2 = unsafe { Rc8::from_raw(raw) };
-    //     let ptr2 = Rc8::as_ptr(&rc2);
-    //     assert_eq!(ptr, ptr2);
-    //     assert_eq!(rc2.len(), 5);
-    //     assert_eq!(rc2[0], 0);
-    //     assert_eq!(rc2[1], 1);
-    //     assert_eq!(rc2[2], 2);
-    //     assert_eq!(rc2[3], 3);
-    //     assert_eq!(rc2[4], 4);
-    // }
+    #[test]
+    fn from_vec() {
+        let rc = Rc8::<[i64]>::from(vec![0, 1, 2, 3, 4]);
+        assert_eq!(rc.len(), 5);
+        assert_eq!(rc[0], 0);
+        assert_eq!(rc[1], 1);
+        assert_eq!(rc[2], 2);
+        assert_eq!(rc[3], 3);
+        assert_eq!(rc[4], 4);
+    }
 }
 
 #[cfg(test)]
@@ -668,6 +698,11 @@ mod leak_ckeck {
 
     struct DropCount<'a> {
         drop_count: &'a mut usize,
+    }
+    impl<'a> DropCount<'a> {
+        fn new(drop_count: &'a mut usize) -> Self {
+            DropCount { drop_count }
+        }
     }
 
     impl<'a> Drop for DropCount<'a> {
@@ -739,6 +774,33 @@ mod leak_ckeck {
             }
             assert_eq!(drop_count, 1);
         }
+    }
+
+    #[test]
+    fn from_vec() {
+        let mut drop_counts0 = 0;
+        let mut drop_counts1 = 0;
+        let mut drop_counts2 = 0;
+        let mut drop_counts3 = 0;
+        let mut drop_counts4 = 0;
+
+        {
+            let v = vec![
+                DropCount::new(&mut drop_counts0),
+                DropCount::new(&mut drop_counts1),
+                DropCount::new(&mut drop_counts2),
+                DropCount::new(&mut drop_counts3),
+                DropCount::new(&mut drop_counts4),
+            ];
+            let rc = Rc8::<[DropCount]>::from(v);
+            assert_eq!(rc.len(), 5);
+        }
+
+        assert_eq!(drop_counts0, 1);
+        assert_eq!(drop_counts1, 1);
+        assert_eq!(drop_counts2, 1);
+        assert_eq!(drop_counts3, 1);
+        assert_eq!(drop_counts4, 1);
     }
 }
 #[cfg(test)]
