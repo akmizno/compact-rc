@@ -690,6 +690,16 @@ mod tests {
         assert_eq!(rc[3], 3);
         assert_eq!(rc[4], 4);
     }
+
+    #[test]
+    fn from_large_vec() {
+        let v = (0..1000).collect::<Vec<_>>();
+        let rc = Rc8::<[i64]>::from(v);
+        assert_eq!(rc.len(), 1000);
+        for i in 0..1000 {
+            assert_eq!(rc[i], i as i64);
+        }
+    }
 }
 
 #[cfg(test)]
