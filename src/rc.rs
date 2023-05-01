@@ -1,8 +1,10 @@
 use std::alloc::{Layout, LayoutError};
+use std::any::Any;
 use std::borrow;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::cmp::Ordering;
+use std::ffi::{CStr, CString};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter;
@@ -179,6 +181,23 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
         deallocate_box(v);
 
         RcX::from_inner(inner)
+    }
+
+    /// See [std::rc::Rc::increment_strong_count].
+    pub unsafe fn increment_strong_count(_ptr: *const T) {
+        todo!();
+    }
+
+    /// See [std::rc::Rc::decrement_strong_count].
+    pub unsafe fn decrement_strong_count(_ptr: *const T) {
+        todo!();
+    }
+}
+
+impl<C: MarkerCounter> RcX<dyn Any, C> {
+    /// See [std::rc::Rc::downcast].
+    pub fn downcast<T: Any>(self) -> Result<Rc<T>, Rc<dyn Any>> {
+        todo!();
     }
 }
 
@@ -414,6 +433,18 @@ impl<C: MarkerCounter> From<&str> for RcX<str, C> {
 impl<C: MarkerCounter> From<String> for RcX<str, C> {
     fn from(v: String) -> RcX<str, C> {
         RcX::from(v.as_ref())
+    }
+}
+
+impl<C: MarkerCounter> From<&CStr> for RcX<CStr, C> {
+    fn from(_v: &CStr) -> RcX<CStr, C> {
+        todo!();
+    }
+}
+
+impl<C: MarkerCounter> From<CString> for RcX<CStr, C> {
+    fn from(_v: CString) -> RcX<CStr, C> {
+        todo!();
     }
 }
 
