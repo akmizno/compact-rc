@@ -403,8 +403,8 @@ impl<T, C: MarkerCounter, const N: usize> TryFrom<RcX<[T], C>> for RcX<[T; N], C
 }
 
 impl<T, C: MarkerCounter> iter::FromIterator<T> for RcX<[T], C> {
-    fn from_iter<I: iter::IntoIterator<Item = T>>(_iter: I) -> Self {
-        todo!();
+    fn from_iter<I: iter::IntoIterator<Item = T>>(iter: I) -> Self {
+        Self::from(iter.into_iter().collect::<Vec<T>>())
     }
 }
 
@@ -700,6 +700,17 @@ mod tests {
             assert_eq!(rc[i], i as i64);
         }
     }
+
+    #[test]
+    fn from_iter() {
+        let rc = Rc8::<[i64]>::from_iter(0..5);
+        assert_eq!(rc.len(), 5);
+        assert_eq!(rc[0], 0);
+        assert_eq!(rc[1], 1);
+        assert_eq!(rc[2], 2);
+        assert_eq!(rc[3], 3);
+        assert_eq!(rc[4], 4);
+    }
 }
 
 #[cfg(test)]
@@ -796,6 +807,34 @@ mod leak_ckeck {
                 DropCount::new(&mut drop_counts4),
             ];
             let rc = Rc8::<[DropCount]>::from(v);
+            assert_eq!(rc.len(), 5);
+        }
+
+        assert_eq!(drop_counts0, 1);
+        assert_eq!(drop_counts1, 1);
+        assert_eq!(drop_counts2, 1);
+        assert_eq!(drop_counts3, 1);
+        assert_eq!(drop_counts4, 1);
+    }
+
+    #[test]
+    fn from_iter() {
+        let mut drop_counts0 = 0;
+        let mut drop_counts1 = 0;
+        let mut drop_counts2 = 0;
+        let mut drop_counts3 = 0;
+        let mut drop_counts4 = 0;
+
+        {
+            let v = vec![
+                DropCount::new(&mut drop_counts0),
+                DropCount::new(&mut drop_counts1),
+                DropCount::new(&mut drop_counts2),
+                DropCount::new(&mut drop_counts3),
+                DropCount::new(&mut drop_counts4),
+            ];
+
+            let rc = Rc8::<[DropCount]>::from_iter(v.into_iter());
             assert_eq!(rc.len(), 5);
         }
 
