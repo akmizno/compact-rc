@@ -424,34 +424,34 @@ impl<T: Clone, C: MarkerCounter> From<&[T]> for RcX<[T], C> {
 }
 
 impl<C: MarkerCounter> From<&str> for RcX<str, C> {
-    fn from(v: &str) -> RcX<str, C> {
-        let rc = RcX::<[u8], C>::from(v.as_bytes());
+    fn from(s: &str) -> RcX<str, C> {
+        let rc = RcX::<[u8], C>::from(s.as_bytes());
         unsafe { RcX::from_raw(RcX::into_raw(rc) as *const str) }
     }
 }
 
 impl<C: MarkerCounter> From<String> for RcX<str, C> {
-    fn from(v: String) -> RcX<str, C> {
-        RcX::from(v.as_ref())
+    fn from(s: String) -> RcX<str, C> {
+        RcX::from(s.as_ref())
     }
 }
 
 impl<C: MarkerCounter> From<&CStr> for RcX<CStr, C> {
-    fn from(v: &CStr) -> RcX<CStr, C> {
-        let rc = RcX::<[u8], C>::from(v.to_bytes_with_nul());
+    fn from(s: &CStr) -> RcX<CStr, C> {
+        let rc = RcX::<[u8], C>::from(s.to_bytes_with_nul());
         unsafe { RcX::from_raw(RcX::into_raw(rc) as *const CStr) }
     }
 }
 
 impl<C: MarkerCounter> From<CString> for RcX<CStr, C> {
-    fn from(v: CString) -> RcX<CStr, C> {
-        RcX::from(v.as_ref())
+    fn from(s: CString) -> RcX<CStr, C> {
+        RcX::from(s.as_ref())
     }
 }
 
 impl<T: ?Sized, C: MarkerCounter> From<Box<T>> for RcX<T, C> {
-    fn from(v: Box<T>) -> RcX<T, C> {
-        unsafe { RcX::from_box(v) }
+    fn from(b: Box<T>) -> RcX<T, C> {
+        unsafe { RcX::from_box(b) }
     }
 }
 
@@ -466,7 +466,7 @@ impl<T, C: MarkerCounter> From<Vec<T>> for RcX<[T], C> {
                 v.len(),
             );
 
-            // Prevent calling T's destructors.
+            // Deallocate the vec without dropping its contents.
             v.set_len(0);
 
             Self::from_inner(RcBox::assume_init_slice(pbox))
