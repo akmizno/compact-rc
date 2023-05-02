@@ -196,8 +196,16 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
 
 impl<C: MarkerCounter> RcX<dyn Any, C> {
     /// See [std::rc::Rc::downcast].
-    pub fn downcast<T: Any>(self) -> Result<Rc<T>, Rc<dyn Any>> {
-        todo!();
+    pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
+        if (*self).is::<T>() {
+            unsafe {
+                let ptr = self.ptr.cast::<RcBox<T, C>>();
+                std::mem::forget(self);
+                Ok(RcX::from_inner(ptr))
+            }
+        } else {
+            Err(self)
+        }
     }
 }
 
@@ -748,6 +756,29 @@ mod tests {
         let rc = Rc8::<i32>::new(1i32);
 
         assert_eq!(rc.as_ref(), &1i32);
+    }
+
+    #[test]
+    fn downcast() {
+        // NOTE RcX<dyn Any> can not be initialized directly because
+        // the CoearseUnsized is unstable.
+
+        {
+            let s = String::from("Hello");
+            let b: Box<dyn Any> = Box::new(s);
+            let rc: Rc8<dyn Any> = Rc8::from(b);
+            let rc = rc.downcast::<String>();
+            assert!(rc.is_ok());
+            assert_eq!(*rc.unwrap(), "Hello");
+        }
+
+        {
+            let d = 1i32;
+            let b: Box<dyn Any> = Box::new(d);
+            let rc: Rc8<dyn Any> = Rc8::from(b);
+            let rc = rc.downcast::<String>();
+            assert!(rc.is_err());
+        }
     }
 
     #[test]
