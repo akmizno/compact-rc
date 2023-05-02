@@ -29,10 +29,15 @@ impl MarkerCounter for u32 {}
 impl MarkerCounter for u64 {}
 impl MarkerCounter for usize {}
 
+/// RcX with u8 counter
 pub type Rc8<T> = RcX<T, u8>;
+/// RcX with u16 counter
 pub type Rc16<T> = RcX<T, u16>;
+/// RcX with u32 counter
 pub type Rc32<T> = RcX<T, u32>;
+/// RcX with u64 counter
 pub type Rc64<T> = RcX<T, u64>;
+/// RcX with usize counter
 pub type Rc<T> = RcX<T, usize>;
 
 #[repr(C)]
@@ -138,6 +143,17 @@ impl<T, C: MarkerCounter> RcBox<T, C> {
     }
 }
 
+/// Low-memory version of [std::rc::Rc].
+///
+/// This type provides almost the same methods as standard `Rc`.
+/// See its documentation to know detailed usage.
+///
+/// There are several aliases for simplicity.
+/// - [Rc]
+/// - [Rc8]
+/// - [Rc16]
+/// - [Rc32]
+/// - [Rc64]
 pub struct RcX<T: ?Sized, C: MarkerCounter> {
     ptr: NonNull<RcBox<T, C>>,
 
@@ -148,21 +164,6 @@ pub struct RcX<T: ?Sized, C: MarkerCounter> {
 
 impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> UnwindSafe for RcX<T, C> {}
 impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> RefUnwindSafe for RcX<T, C> {}
-
-impl<C: MarkerCounter> RcX<dyn Any, C> {
-    /// See [std::rc::Rc::downcast].
-    pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
-        if (*self).is::<T>() {
-            unsafe {
-                let ptr = self.ptr.cast::<RcBox<T, C>>();
-                mem::forget(self);
-                Ok(RcX::from_inner(ptr))
-            }
-        } else {
-            Err(self)
-        }
-    }
-}
 
 impl<T, C: MarkerCounter> RcX<T, C> {
     unsafe fn unwrap_unchecked(self) -> T {
@@ -317,6 +318,21 @@ impl<T: Clone, C: MarkerCounter> RcX<T, C> {
             *this = Self::new((**this).clone());
         }
         unsafe { Self::get_mut(this).unwrap_unchecked() }
+    }
+}
+
+impl<C: MarkerCounter> RcX<dyn Any, C> {
+    /// See [std::rc::Rc::downcast].
+    pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
+        if (*self).is::<T>() {
+            unsafe {
+                let ptr = self.ptr.cast::<RcBox<T, C>>();
+                mem::forget(self);
+                Ok(RcX::from_inner(ptr))
+            }
+        } else {
+            Err(self)
+        }
     }
 }
 
