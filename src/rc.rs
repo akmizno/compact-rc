@@ -19,6 +19,8 @@ use std::ptr::NonNull;
 
 use num::{one, CheckedAdd, Unsigned};
 
+use crate::maybe_fat::MaybeFatPtr;
+
 pub trait MarkerCounter: Copy + CheckedAdd + Sub + Unsigned {}
 
 impl MarkerCounter for u8 {}
@@ -90,26 +92,13 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
         let copy_size = nopad_size - offset;
         std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue, copy_size);
 
-        // FIXME Following implementation should be rewritten in the future.
-        // This code *assume* that the ptr is a fat pointer consists of two parts,
-        // address and metadata, like (address: usize, metadata: usize).
+        // Let the pfat is a fat pointer to the allocated memory.
+        // At this moment, it is initialized with dummy address and valid metadata by using ptr.
+        let mut pfat = MaybeFatPtr::from_raw(ptr);
+        // Fix address part to valid address.
+        *pfat.address_part_mut() = pthin.as_ptr() as usize;
 
-        let palloc = ptr.clone();
-        // where the palloc is a fat pointer to the allocated memory.
-        // At this moment, it is initialized with dummy address and valid metadata by cloning ptr.
-        //
-        // The address part is changed to valid address in the following block.
-        {
-            let ppalloc = &palloc as *const *const T;
-            // Reinterpret the ppalloc as a pointer to (usize, usize).
-            // Then change its address part.
-            // The metadata part should not be touched.
-            let ppfat = ppalloc as *mut (usize, usize);
-            let address: &mut usize = &mut (*ppfat).0;
-            *address = pthin.as_ptr() as usize;
-        }
-
-        let pbox = palloc as *mut RcBox<T, C>;
+        let pbox = pfat.into_raw() as *mut RcBox<T, C>;
         let mut pbox = NonNull::new(pbox).unwrap_unchecked();
 
         // Initialize the counter
@@ -269,25 +258,17 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
 
         let offset = RcBox::<T, C>::offset_of_value(&*ptr);
 
-        // FIXME Following implementation should be rewritten using pointer_byte_offsets APIs in the future.
-        // This code *assume* that the ptr is a fat pointer consists of two parts,
-        // address and metadata, like (address: usize, metadata: usize).
+        let mut pfat = MaybeFatPtr::from_raw(ptr);
 
-        // Let pptr is a pointer to pointer to deal with dynamically sized types;
-        let pptr = &ptr as *const *const T;
+        // Fix address of the pointer.
+        let address = *pfat.address_part();
+        assume!(offset <= address);
+        *pfat.address_part_mut() = address - offset;
 
-        // Reinterpret the pptr as a pointer to (usize, usize).
-        // Then change its address part.
-        // The metadata part should not be touched.
-        let ppfat = pptr as *mut (usize, usize);
-        let address: &mut usize = &mut (*ppfat).0;
-        assume!(offset <= *address);
-        *address -= offset;
+        // Reinterpret the pptr as a pointer to RcBox.
+        let pbox = pfat.into_raw() as *mut RcBox<T, C>;
 
-        // Reinterpret the pptr as a pointer to pointer to RcBox.
-        let raw_pptr = pptr as *const *mut RcBox<T, C>;
-
-        Self::from_inner(NonNull::new(*raw_pptr).unwrap_unchecked())
+        Self::from_inner(NonNull::new(pbox).unwrap_unchecked())
     }
 
     /// See [std::rc::Rc::increment_strong_count].
