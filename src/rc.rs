@@ -272,13 +272,18 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     }
 
     /// See [std::rc::Rc::increment_strong_count].
-    pub unsafe fn increment_strong_count(_ptr: *const T) {
-        todo!();
+    pub unsafe fn increment_strong_count(ptr: *const T) {
+        let rc = Self::from_raw(ptr);
+        // Increment the refcount, but do not drop it.
+        mem::forget(rc.clone());
+        mem::forget(rc);
     }
 
     /// See [std::rc::Rc::decrement_strong_count].
-    pub unsafe fn decrement_strong_count(_ptr: *const T) {
-        todo!();
+    pub unsafe fn decrement_strong_count(ptr: *const T) {
+        let rc = Self::from_raw(ptr);
+        // Decrement the refcount by dropping it.
+        drop(rc);
     }
 
     /// See [std::rc::Rc::strong_count].
@@ -801,6 +806,28 @@ mod tests {
     }
 
     #[test]
+    fn increment_decrement_strong_count() {
+        let rc = Rc8::<i32>::new(1i32);
+        let rc2 = rc.clone();
+        let ptr = Rc8::into_raw(rc2);
+
+        assert_eq!(Rc8::strong_count(&rc), 2);
+        unsafe {
+            Rc8::increment_strong_count(ptr);
+        }
+        assert_eq!(Rc8::strong_count(&rc), 3);
+
+        unsafe {
+            Rc8::decrement_strong_count(ptr);
+        }
+        assert_eq!(Rc8::strong_count(&rc), 2);
+
+        unsafe {
+            let _rc3 = Rc8::from_raw(ptr);
+        }
+    }
+
+    #[test]
     fn from_vec() {
         let rc = Rc8::<[i64]>::from(vec![0, 1, 2, 3, 4]);
         assert_eq!(rc.len(), 5);
@@ -1042,6 +1069,26 @@ mod leak_ckeck {
             }
             assert_eq!(drop_count, 1);
         }
+    }
+
+    #[test]
+    fn increment_decrement_strong_count() {
+        let mut drop_count = 0;
+        let rc = Rc8::new(DropCount::new(&mut drop_count));
+        let rc2 = rc.clone();
+        let ptr = Rc8::into_raw(rc2);
+
+        unsafe {
+            Rc8::increment_strong_count(ptr);
+            Rc8::decrement_strong_count(ptr);
+        }
+
+        unsafe {
+            let _rc3 = Rc8::from_raw(ptr);
+        }
+        drop(rc);
+
+        assert_eq!(drop_count, 1);
     }
 
     #[test]
