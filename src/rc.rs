@@ -81,31 +81,38 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
     unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
         let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
         let nopad_size = layout_nopad.size();
-        let tp = std::alloc::alloc(layout_nopad.pad_to_align());
-        let tp = NonNull::new(tp).unwrap();
-        let pvalue = tp.as_ptr().add(offset);
+        let pthin = std::alloc::alloc(layout_nopad.pad_to_align());
+        let pthin = NonNull::new(pthin).unwrap();
+        let pvalue = pthin.as_ptr().add(offset);
 
-        // Copy contents.
+        // memcpy the contents.
+        assume!(offset <= nopad_size);
         let copy_size = nopad_size - offset;
         std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue, copy_size);
 
         // FIXME Following implementation should be rewritten in the future.
-        // Fat pointer; dummy address and valid metadata.
-        let pret = ptr.clone();
-        // Change its address part to allocated address.
+        // This code *assume* that the ptr is a fat pointer consists of two parts,
+        // address and metadata, like (address: usize, metadata: usize).
+
+        let palloc = ptr.clone();
+        // where the palloc is a fat pointer to the allocated memory.
+        // At this moment, it is initialized with dummy address and valid metadata by cloning ptr.
+        //
+        // The address part is changed to valid address in the following block.
         {
-            let ppret = &pret as *const *const T;
-            // Reinterpret the ppret as a pointer to (usize, usize).
+            let ppalloc = &palloc as *const *const T;
+            // Reinterpret the ppalloc as a pointer to (usize, usize).
             // Then change its address part.
-            // The metadata part should not be used by this code.
-            let dst_ppret = ppret as *mut (usize, usize);
-            let address: &mut usize = &mut (*dst_ppret).0;
-            *address = tp.as_ptr() as usize;
+            // The metadata part should not be touched.
+            let ppfat = ppalloc as *mut (usize, usize);
+            let address: &mut usize = &mut (*ppfat).0;
+            *address = pthin.as_ptr() as usize;
         }
 
-        // cast
-        let pbox = pret as *mut RcBox<T, C>;
+        let pbox = palloc as *mut RcBox<T, C>;
         let mut pbox = NonNull::new(pbox).unwrap_unchecked();
+
+        // Initialize the counter
         std::ptr::write(&mut pbox.as_mut().strong, Cell::new(C::one()));
 
         pbox
@@ -153,54 +160,13 @@ pub struct RcX<T: ?Sized, C: MarkerCounter> {
 impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> UnwindSafe for RcX<T, C> {}
 impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> RefUnwindSafe for RcX<T, C> {}
 
-/// Deallocate the box without dropping its contents
-unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
-    let _drop = Box::from_raw(Box::into_raw(v) as *mut ManuallyDrop<T>);
-}
-
-impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
-    fn inner(&self) -> &RcBox<T, C> {
-        unsafe { self.ptr.as_ref() }
-    }
-
-    fn inner_mut(&mut self) -> &mut RcBox<T, C> {
-        unsafe { self.ptr.as_mut() }
-    }
-
-    unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
-        Self {
-            ptr,
-            _phantom: PhantomData,
-        }
-    }
-
-    unsafe fn from_box(v: Box<T>) -> RcX<T, C> {
-        let ptr = v.as_ref() as *const T;
-        let inner = RcBox::<T, C>::alloc_copy_from_ptr(ptr);
-
-        deallocate_box(v);
-
-        RcX::from_inner(inner)
-    }
-
-    /// See [std::rc::Rc::increment_strong_count].
-    pub unsafe fn increment_strong_count(_ptr: *const T) {
-        todo!();
-    }
-
-    /// See [std::rc::Rc::decrement_strong_count].
-    pub unsafe fn decrement_strong_count(_ptr: *const T) {
-        todo!();
-    }
-}
-
 impl<C: MarkerCounter> RcX<dyn Any, C> {
     /// See [std::rc::Rc::downcast].
     pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
         if (*self).is::<T>() {
             unsafe {
                 let ptr = self.ptr.cast::<RcBox<T, C>>();
-                std::mem::forget(self);
+                mem::forget(self);
                 Ok(RcX::from_inner(ptr))
             }
         } else {
@@ -254,7 +220,36 @@ impl<T, C: MarkerCounter> RcX<T, C> {
     }
 }
 
+/// Deallocate the box without dropping its contents
+unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
+    let _drop = Box::from_raw(Box::into_raw(v) as *mut ManuallyDrop<T>);
+}
+
 impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
+    fn inner(&self) -> &RcBox<T, C> {
+        unsafe { self.ptr.as_ref() }
+    }
+
+    fn inner_mut(&mut self) -> &mut RcBox<T, C> {
+        unsafe { self.ptr.as_mut() }
+    }
+
+    unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
+        Self {
+            ptr,
+            _phantom: PhantomData,
+        }
+    }
+
+    unsafe fn from_box(v: Box<T>) -> RcX<T, C> {
+        let ptr = v.as_ref() as *const T;
+        let inner = RcBox::<T, C>::alloc_copy_from_ptr(ptr);
+
+        deallocate_box(v);
+
+        RcX::from_inner(inner)
+    }
+
     /// See [std::rc::Rc::as_ptr].
     pub fn as_ptr(this: &Self) -> *const T {
         // The value should be initialized.
@@ -275,17 +270,17 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
         let offset = RcBox::<T, C>::offset_of_value(&*ptr);
 
         // FIXME Following implementation should be rewritten using pointer_byte_offsets APIs in the future.
-
-        // A pointer to pointer is used to deal with dynamically sized types;
         // This code *assume* that the ptr is a fat pointer consists of two parts,
         // address and metadata, like (address: usize, metadata: usize).
+
+        // Let pptr is a pointer to pointer to deal with dynamically sized types;
         let pptr = &ptr as *const *const T;
 
         // Reinterpret the pptr as a pointer to (usize, usize).
         // Then change its address part.
-        // The metadata part should not be used by this code.
-        let dst_pptr = pptr as *mut (usize, usize);
-        let address: &mut usize = &mut (*dst_pptr).0;
+        // The metadata part should not be touched.
+        let ppfat = pptr as *mut (usize, usize);
+        let address: &mut usize = &mut (*ppfat).0;
         assume!(offset <= *address);
         *address -= offset;
 
@@ -293,6 +288,16 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
         let raw_pptr = pptr as *const *mut RcBox<T, C>;
 
         Self::from_inner(NonNull::new(*raw_pptr).unwrap_unchecked())
+    }
+
+    /// See [std::rc::Rc::increment_strong_count].
+    pub unsafe fn increment_strong_count(_ptr: *const T) {
+        todo!();
+    }
+
+    /// See [std::rc::Rc::decrement_strong_count].
+    pub unsafe fn decrement_strong_count(_ptr: *const T) {
+        todo!();
     }
 
     /// See [std::rc::Rc::strong_count].
