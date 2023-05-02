@@ -34,6 +34,7 @@ mod macros;
 mod maybe_fat;
 
 pub mod rc;
+pub mod refcount;
 
 pub use rc::Rc;
 pub use rc::Rc16;

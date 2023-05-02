@@ -12,59 +12,45 @@ use std::marker::PhantomData;
 use std::mem;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
-use std::ops::Sub;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 use std::ptr::NonNull;
 
-use num::{one, CheckedAdd, Unsigned};
-
 use crate::maybe_fat::MaybeFatPtr;
-
-pub trait MarkerCounter: Copy + CheckedAdd + Sub + Unsigned {}
-
-impl MarkerCounter for u8 {}
-impl MarkerCounter for u16 {}
-impl MarkerCounter for u32 {}
-impl MarkerCounter for u64 {}
-impl MarkerCounter for usize {}
+use crate::refcount::RefCount;
 
 /// RcX with u8 counter
-pub type Rc8<T> = RcX<T, u8>;
+pub type Rc8<T> = RcX<T, Cell<u8>>;
 /// RcX with u16 counter
-pub type Rc16<T> = RcX<T, u16>;
+pub type Rc16<T> = RcX<T, Cell<u16>>;
 /// RcX with u32 counter
-pub type Rc32<T> = RcX<T, u32>;
+pub type Rc32<T> = RcX<T, Cell<u32>>;
 /// RcX with u64 counter
-pub type Rc64<T> = RcX<T, u64>;
+pub type Rc64<T> = RcX<T, Cell<u64>>;
 /// RcX with usize counter
-pub type Rc<T> = RcX<T, usize>;
+pub type Rc<T> = RcX<T, Cell<usize>>;
 
 #[repr(C)]
 struct RcBox<T: ?Sized, C> {
-    strong: Cell<C>,
+    strong: C,
     value: T,
 }
 
-impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
-    fn strong(&self) -> C {
-        self.strong.get()
+impl<T: ?Sized, C: RefCount> RcBox<T, C> {
+    fn strong(&self) -> C::Value {
+        self.strong.count()
+    }
+
+    fn is_unique(&self) -> bool {
+        self.strong.is_one()
     }
 
     fn inc_strong(&self) {
-        let count = self.strong();
-        assume!(!count.is_zero());
-        match count.checked_add(&one()) {
-            Some(c) => self.strong.set(c),
-            None => std::process::abort(),
-        }
+        self.strong.inc();
     }
 
-    fn dec_strong(&self) {
-        let count = self.strong();
-        assume!(!count.is_zero());
-        let c = count.sub(one());
-        self.strong.set(c);
+    fn dec_strong(&self) -> bool {
+        self.strong.dec()
     }
 
     unsafe fn layout_nopad(layout_value: Layout) -> Result<(Layout, usize), LayoutError> {
@@ -107,13 +93,13 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
         let mut pbox = NonNull::new(pbox).unwrap_unchecked();
 
         // Initialize the counter
-        std::ptr::write(&mut pbox.as_mut().strong, Cell::new(C::one()));
+        std::ptr::write(&mut pbox.as_mut().strong, C::one());
 
         pbox
     }
 }
 
-impl<T, C: MarkerCounter> RcBox<T, C> {
+impl<T, C: RefCount> RcBox<T, C> {
     /// Allocate an RcBox with the given length.
     ///
     /// Returns a pointer to the allocated RcBox.
@@ -127,7 +113,7 @@ impl<T, C: MarkerCounter> RcBox<T, C> {
         let fp = std::ptr::slice_from_raw_parts_mut(tp.as_mut(), len);
         let pbox = fp as *mut RcBox<[MaybeUninit<T>], C>;
         let mut pbox = NonNull::new(pbox).unwrap_unchecked();
-        std::ptr::write(&mut pbox.as_mut().strong, Cell::new(C::one()));
+        std::ptr::write(&mut pbox.as_mut().strong, C::one());
         pbox
     }
     unsafe fn assume_init_slice(
@@ -137,7 +123,7 @@ impl<T, C: MarkerCounter> RcBox<T, C> {
     }
 }
 
-impl<T, C: MarkerCounter> RcBox<T, C> {
+impl<T, C: RefCount> RcBox<T, C> {
     unsafe fn as_uninit(&mut self) -> &mut RcBox<MaybeUninit<T>, C> {
         mem::transmute(self)
     }
@@ -154,7 +140,7 @@ impl<T, C: MarkerCounter> RcBox<T, C> {
 /// - [Rc16]
 /// - [Rc32]
 /// - [Rc64]
-pub struct RcX<T: ?Sized, C: MarkerCounter> {
+pub struct RcX<T: ?Sized, C: RefCount> {
     ptr: NonNull<RcBox<T, C>>,
 
     // NOTE PhantomData for dropck.
@@ -162,10 +148,10 @@ pub struct RcX<T: ?Sized, C: MarkerCounter> {
     _phantom: PhantomData<RcBox<T, C>>,
 }
 
-impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> UnwindSafe for RcX<T, C> {}
-impl<T: RefUnwindSafe + ?Sized, C: MarkerCounter> RefUnwindSafe for RcX<T, C> {}
+impl<T: RefUnwindSafe + ?Sized, C: RefCount> UnwindSafe for RcX<T, C> {}
+impl<T: RefUnwindSafe + ?Sized, C: RefCount> RefUnwindSafe for RcX<T, C> {}
 
-impl<T, C: MarkerCounter> RcX<T, C> {
+impl<T, C: RefCount> RcX<T, C> {
     unsafe fn unwrap_unchecked(self) -> T {
         assume!(RcX::is_unique(&self));
 
@@ -187,7 +173,7 @@ impl<T, C: MarkerCounter> RcX<T, C> {
         unsafe {
             Self::from_inner(
                 Box::leak(Box::new(RcBox {
-                    strong: Cell::new(C::one()),
+                    strong: C::one(),
                     value,
                 }))
                 .into(),
@@ -215,7 +201,7 @@ unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
     let _drop = Box::from_raw(Box::into_raw(v) as *mut ManuallyDrop<T>);
 }
 
-impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
+impl<T: ?Sized, C: RefCount> RcX<T, C> {
     fn inner(&self) -> &RcBox<T, C> {
         unsafe { self.ptr.as_ref() }
     }
@@ -288,12 +274,12 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     }
 
     /// See [std::rc::Rc::strong_count].
-    pub fn strong_count(this: &Self) -> C {
+    pub fn strong_count(this: &Self) -> C::Value {
         this.inner().strong()
     }
 
     fn is_unique(this: &Self) -> bool {
-        Self::strong_count(&this) == C::one()
+        this.inner().is_unique()
     }
 
     /// See [std::rc::Rc::get_mut].
@@ -311,7 +297,7 @@ impl<T: ?Sized, C: MarkerCounter> RcX<T, C> {
     }
 }
 
-impl<T: Clone, C: MarkerCounter> RcX<T, C> {
+impl<T: Clone, C: RefCount> RcX<T, C> {
     /// See [std::rc::Rc::make_mut].
     pub fn make_mut(this: &mut Self) -> &mut T {
         if !Self::is_unique(this) {
@@ -321,7 +307,7 @@ impl<T: Clone, C: MarkerCounter> RcX<T, C> {
     }
 }
 
-impl<C: MarkerCounter> RcX<dyn Any, C> {
+impl<C: RefCount> RcX<dyn Any, C> {
     /// See [std::rc::Rc::downcast].
     pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
         if (*self).is::<T>() {
@@ -336,7 +322,7 @@ impl<C: MarkerCounter> RcX<dyn Any, C> {
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> Deref for RcX<T, C> {
+impl<T: ?Sized, C: RefCount> Deref for RcX<T, C> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -344,10 +330,9 @@ impl<T: ?Sized, C: MarkerCounter> Deref for RcX<T, C> {
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> Drop for RcX<T, C> {
+impl<T: ?Sized, C: RefCount> Drop for RcX<T, C> {
     fn drop(&mut self) {
-        self.inner().dec_strong();
-        if self.inner().strong().is_zero() {
+        if self.inner().dec_strong() {
             unsafe {
                 drop(Box::from_raw(self.ptr.as_mut()));
             }
@@ -355,20 +340,20 @@ impl<T: ?Sized, C: MarkerCounter> Drop for RcX<T, C> {
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> Clone for RcX<T, C> {
+impl<T: ?Sized, C: RefCount> Clone for RcX<T, C> {
     fn clone(&self) -> RcX<T, C> {
         self.inner().inc_strong();
         unsafe { Self::from_inner(self.ptr) }
     }
 }
 
-impl<T: Default, C: MarkerCounter> Default for RcX<T, C> {
+impl<T: Default, C: RefCount> Default for RcX<T, C> {
     fn default() -> RcX<T, C> {
         RcX::new(Default::default())
     }
 }
 
-impl<T: ?Sized + PartialEq, C: MarkerCounter> PartialEq for RcX<T, C> {
+impl<T: ?Sized + PartialEq, C: RefCount> PartialEq for RcX<T, C> {
     fn eq(&self, other: &RcX<T, C>) -> bool {
         // NOTE
         // Optimization by comparing their addresses can not be used for T: PartialEq.
@@ -380,51 +365,51 @@ impl<T: ?Sized + PartialEq, C: MarkerCounter> PartialEq for RcX<T, C> {
     }
 }
 
-impl<T: ?Sized + Eq, C: MarkerCounter> Eq for RcX<T, C> {}
+impl<T: ?Sized + Eq, C: RefCount> Eq for RcX<T, C> {}
 
-impl<T: ?Sized + PartialOrd, C: MarkerCounter> PartialOrd for RcX<T, C> {
+impl<T: ?Sized + PartialOrd, C: RefCount> PartialOrd for RcX<T, C> {
     fn partial_cmp(&self, other: &RcX<T, C>) -> Option<Ordering> {
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
 
-impl<T: ?Sized + Ord, C: MarkerCounter> Ord for RcX<T, C> {
+impl<T: ?Sized + Ord, C: RefCount> Ord for RcX<T, C> {
     fn cmp(&self, other: &RcX<T, C>) -> Ordering {
         Ord::cmp(&**self, &**other)
     }
 }
 
-impl<T: ?Sized + Hash, C: MarkerCounter> Hash for RcX<T, C> {
+impl<T: ?Sized + Hash, C: RefCount> Hash for RcX<T, C> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
     }
 }
 
-impl<T: ?Sized + fmt::Display, C: MarkerCounter> fmt::Display for RcX<T, C> {
+impl<T: ?Sized + fmt::Display, C: RefCount> fmt::Display for RcX<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized + fmt::Debug, C: MarkerCounter> fmt::Debug for RcX<T, C> {
+impl<T: ?Sized + fmt::Debug, C: RefCount> fmt::Debug for RcX<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> fmt::Pointer for RcX<T, C> {
+impl<T: ?Sized, C: RefCount> fmt::Pointer for RcX<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Pointer::fmt(&(RcX::as_ptr(self)), f)
     }
 }
 
-impl<T, C: MarkerCounter> From<T> for RcX<T, C> {
+impl<T, C: RefCount> From<T> for RcX<T, C> {
     fn from(t: T) -> Self {
         Self::new(t)
     }
 }
 
-impl<T: Clone, C: MarkerCounter> From<&[T]> for RcX<[T], C> {
+impl<T: Clone, C: RefCount> From<&[T]> for RcX<[T], C> {
     fn from(v: &[T]) -> RcX<[T], C> {
         unsafe {
             let mut pbox = RcBox::<T, C>::allocate_for_slice(v.len());
@@ -438,39 +423,39 @@ impl<T: Clone, C: MarkerCounter> From<&[T]> for RcX<[T], C> {
     }
 }
 
-impl<C: MarkerCounter> From<&str> for RcX<str, C> {
+impl<C: RefCount> From<&str> for RcX<str, C> {
     fn from(s: &str) -> RcX<str, C> {
         let rc = RcX::<[u8], C>::from(s.as_bytes());
         unsafe { RcX::from_raw(RcX::into_raw(rc) as *const str) }
     }
 }
 
-impl<C: MarkerCounter> From<String> for RcX<str, C> {
+impl<C: RefCount> From<String> for RcX<str, C> {
     fn from(s: String) -> RcX<str, C> {
         RcX::from(s.as_ref())
     }
 }
 
-impl<C: MarkerCounter> From<&CStr> for RcX<CStr, C> {
+impl<C: RefCount> From<&CStr> for RcX<CStr, C> {
     fn from(s: &CStr) -> RcX<CStr, C> {
         let rc = RcX::<[u8], C>::from(s.to_bytes_with_nul());
         unsafe { RcX::from_raw(RcX::into_raw(rc) as *const CStr) }
     }
 }
 
-impl<C: MarkerCounter> From<CString> for RcX<CStr, C> {
+impl<C: RefCount> From<CString> for RcX<CStr, C> {
     fn from(s: CString) -> RcX<CStr, C> {
         RcX::from(s.as_ref())
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> From<Box<T>> for RcX<T, C> {
+impl<T: ?Sized, C: RefCount> From<Box<T>> for RcX<T, C> {
     fn from(b: Box<T>) -> RcX<T, C> {
         unsafe { RcX::from_box(b) }
     }
 }
 
-impl<T, C: MarkerCounter> From<Vec<T>> for RcX<[T], C> {
+impl<T, C: RefCount> From<Vec<T>> for RcX<[T], C> {
     fn from(mut v: Vec<T>) -> RcX<[T], C> {
         unsafe {
             let mut pbox = RcBox::<T, C>::allocate_for_slice(v.len());
@@ -489,7 +474,7 @@ impl<T, C: MarkerCounter> From<Vec<T>> for RcX<[T], C> {
     }
 }
 
-impl<'a, B, C: MarkerCounter> From<Cow<'a, B>> for RcX<B, C>
+impl<'a, B, C: RefCount> From<Cow<'a, B>> for RcX<B, C>
 where
     B: ToOwned + ?Sized,
     RcX<B, C>: From<&'a B> + From<B::Owned>,
@@ -502,13 +487,13 @@ where
     }
 }
 
-impl<C: MarkerCounter> From<RcX<str, C>> for RcX<[u8], C> {
+impl<C: RefCount> From<RcX<str, C>> for RcX<[u8], C> {
     fn from(rc: RcX<str, C>) -> Self {
         unsafe { RcX::from_raw(RcX::into_raw(rc) as *const [u8]) }
     }
 }
 
-impl<T, C: MarkerCounter, const N: usize> TryFrom<RcX<[T], C>> for RcX<[T; N], C> {
+impl<T, C: RefCount, const N: usize> TryFrom<RcX<[T], C>> for RcX<[T; N], C> {
     type Error = RcX<[T], C>;
 
     fn try_from(boxed_slice: RcX<[T], C>) -> Result<Self, Self::Error> {
@@ -520,25 +505,25 @@ impl<T, C: MarkerCounter, const N: usize> TryFrom<RcX<[T], C>> for RcX<[T; N], C
     }
 }
 
-impl<T, C: MarkerCounter> iter::FromIterator<T> for RcX<[T], C> {
+impl<T, C: RefCount> iter::FromIterator<T> for RcX<[T], C> {
     fn from_iter<I: iter::IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from(iter.into_iter().collect::<Vec<T>>())
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> borrow::Borrow<T> for RcX<T, C> {
+impl<T: ?Sized, C: RefCount> borrow::Borrow<T> for RcX<T, C> {
     fn borrow(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> AsRef<T> for RcX<T, C> {
+impl<T: ?Sized, C: RefCount> AsRef<T> for RcX<T, C> {
     fn as_ref(&self) -> &T {
         &**self
     }
 }
 
-impl<T: ?Sized, C: MarkerCounter> Unpin for RcX<T, C> {}
+impl<T: ?Sized, C: RefCount> Unpin for RcX<T, C> {}
 
 #[cfg(test)]
 mod tests {
@@ -1175,54 +1160,60 @@ mod leak_ckeck {
 mod rcbox {
     use super::*;
 
+    type RcBox8<T> = RcBox<T, Cell<u8>>;
+    type RcBox16<T> = RcBox<T, Cell<u16>>;
+    type RcBox32<T> = RcBox<T, Cell<u32>>;
+    type RcBox64<T> = RcBox<T, Cell<u64>>;
+    type RcBoxU<T> = RcBox<T, Cell<usize>>;
+
     #[test]
     fn offset_of_value() {
         unsafe {
-            assert_eq!(1, RcBox::<u8, u8>::offset_of_value(&0));
-            assert_eq!(2, RcBox::<u8, u16>::offset_of_value(&0));
-            assert_eq!(4, RcBox::<u8, u32>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u8, u64>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u8, usize>::offset_of_value(&0));
+            assert_eq!(1, RcBox8::<u8>::offset_of_value(&0));
+            assert_eq!(2, RcBox16::<u8>::offset_of_value(&0));
+            assert_eq!(4, RcBox32::<u8>::offset_of_value(&0));
+            assert_eq!(8, RcBox64::<u8>::offset_of_value(&0));
+            assert_eq!(8, RcBoxU::<u8>::offset_of_value(&0));
         }
 
         unsafe {
-            assert_eq!(2, RcBox::<u16, u8>::offset_of_value(&0));
-            assert_eq!(2, RcBox::<u16, u16>::offset_of_value(&0));
-            assert_eq!(4, RcBox::<u16, u32>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u16, u64>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u16, usize>::offset_of_value(&0));
+            assert_eq!(2, RcBox8::<u16>::offset_of_value(&0));
+            assert_eq!(2, RcBox16::<u16>::offset_of_value(&0));
+            assert_eq!(4, RcBox32::<u16>::offset_of_value(&0));
+            assert_eq!(8, RcBox64::<u16>::offset_of_value(&0));
+            assert_eq!(8, RcBoxU::<u16>::offset_of_value(&0));
         }
 
         unsafe {
-            assert_eq!(4, RcBox::<u32, u8>::offset_of_value(&0));
-            assert_eq!(4, RcBox::<u32, u16>::offset_of_value(&0));
-            assert_eq!(4, RcBox::<u32, u32>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u32, u64>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u32, usize>::offset_of_value(&0));
+            assert_eq!(4, RcBox8::<u32>::offset_of_value(&0));
+            assert_eq!(4, RcBox16::<u32>::offset_of_value(&0));
+            assert_eq!(4, RcBox32::<u32>::offset_of_value(&0));
+            assert_eq!(8, RcBox64::<u32>::offset_of_value(&0));
+            assert_eq!(8, RcBoxU::<u32>::offset_of_value(&0));
         }
 
         unsafe {
-            assert_eq!(8, RcBox::<u64, u8>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u64, u16>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u64, u32>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u64, u64>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<u64, usize>::offset_of_value(&0));
+            assert_eq!(8, RcBox8::<u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox16::<u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox32::<u64>::offset_of_value(&0));
+            assert_eq!(8, RcBox64::<u64>::offset_of_value(&0));
+            assert_eq!(8, RcBoxU::<u64>::offset_of_value(&0));
         }
 
         unsafe {
-            assert_eq!(8, RcBox::<usize, u8>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<usize, u16>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<usize, u32>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<usize, u64>::offset_of_value(&0));
-            assert_eq!(8, RcBox::<usize, usize>::offset_of_value(&0));
+            assert_eq!(8, RcBox8::<usize>::offset_of_value(&0));
+            assert_eq!(8, RcBox16::<usize>::offset_of_value(&0));
+            assert_eq!(8, RcBox32::<usize>::offset_of_value(&0));
+            assert_eq!(8, RcBox64::<usize>::offset_of_value(&0));
+            assert_eq!(8, RcBoxU::<usize>::offset_of_value(&0));
         }
 
         unsafe {
-            assert_eq!(2, RcBox::<(u8, u16), u8>::offset_of_value(&(0, 0)));
-            assert_eq!(2, RcBox::<(u8, u16), u16>::offset_of_value(&(0, 0)));
-            assert_eq!(4, RcBox::<(u8, u16), u32>::offset_of_value(&(0, 0)));
-            assert_eq!(8, RcBox::<(u8, u16), u64>::offset_of_value(&(0, 0)));
-            assert_eq!(8, RcBox::<(u8, u16), usize>::offset_of_value(&(0, 0)));
+            assert_eq!(2, RcBox8::<(u8, u16)>::offset_of_value(&(0, 0)));
+            assert_eq!(2, RcBox16::<(u8, u16)>::offset_of_value(&(0, 0)));
+            assert_eq!(4, RcBox32::<(u8, u16)>::offset_of_value(&(0, 0)));
+            assert_eq!(8, RcBox64::<(u8, u16)>::offset_of_value(&(0, 0)));
+            assert_eq!(8, RcBoxU::<(u8, u16)>::offset_of_value(&(0, 0)));
         }
     }
 
@@ -1231,61 +1222,61 @@ mod rcbox {
         // slice
         unsafe {
             let value = [0, 1, 2, 3];
-            assert_eq!(1, RcBox::<[u8], u8>::offset_of_value(&value));
-            assert_eq!(2, RcBox::<[u8], u16>::offset_of_value(&value));
-            assert_eq!(4, RcBox::<[u8], u32>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u8], u64>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u8], usize>::offset_of_value(&value));
+            assert_eq!(1, RcBox8::<[u8]>::offset_of_value(&value));
+            assert_eq!(2, RcBox16::<[u8]>::offset_of_value(&value));
+            assert_eq!(4, RcBox32::<[u8]>::offset_of_value(&value));
+            assert_eq!(8, RcBox64::<[u8]>::offset_of_value(&value));
+            assert_eq!(8, RcBoxU::<[u8]>::offset_of_value(&value));
         }
 
         // slice
         unsafe {
             let value = [0, 1, 2, 3];
-            assert_eq!(2, RcBox::<[u16], u8>::offset_of_value(&value));
-            assert_eq!(2, RcBox::<[u16], u16>::offset_of_value(&value));
-            assert_eq!(4, RcBox::<[u16], u32>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u16], u64>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u16], usize>::offset_of_value(&value));
+            assert_eq!(2, RcBox8::<[u16]>::offset_of_value(&value));
+            assert_eq!(2, RcBox16::<[u16]>::offset_of_value(&value));
+            assert_eq!(4, RcBox32::<[u16]>::offset_of_value(&value));
+            assert_eq!(8, RcBox64::<[u16]>::offset_of_value(&value));
+            assert_eq!(8, RcBoxU::<[u16]>::offset_of_value(&value));
         }
 
         // slice
         unsafe {
             let value = [0, 1, 2, 3];
-            assert_eq!(4, RcBox::<[u32], u8>::offset_of_value(&value));
-            assert_eq!(4, RcBox::<[u32], u16>::offset_of_value(&value));
-            assert_eq!(4, RcBox::<[u32], u32>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u32], u64>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u32], usize>::offset_of_value(&value));
+            assert_eq!(4, RcBox8::<[u32]>::offset_of_value(&value));
+            assert_eq!(4, RcBox16::<[u32]>::offset_of_value(&value));
+            assert_eq!(4, RcBox32::<[u32]>::offset_of_value(&value));
+            assert_eq!(8, RcBox64::<[u32]>::offset_of_value(&value));
+            assert_eq!(8, RcBoxU::<[u32]>::offset_of_value(&value));
         }
 
         // slice
         unsafe {
             let value = [0, 1, 2, 3];
-            assert_eq!(8, RcBox::<[u64], u8>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u64], u16>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u64], u32>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u64], u64>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[u64], usize>::offset_of_value(&value));
+            assert_eq!(8, RcBox8::<[u64]>::offset_of_value(&value));
+            assert_eq!(8, RcBox16::<[u64]>::offset_of_value(&value));
+            assert_eq!(8, RcBox32::<[u64]>::offset_of_value(&value));
+            assert_eq!(8, RcBox64::<[u64]>::offset_of_value(&value));
+            assert_eq!(8, RcBoxU::<[u64]>::offset_of_value(&value));
         }
 
         // slice
         unsafe {
             let value = [0, 1, 2, 3];
-            assert_eq!(8, RcBox::<[usize], u8>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[usize], u16>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[usize], u32>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[usize], u64>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<[usize], usize>::offset_of_value(&value));
+            assert_eq!(8, RcBox8::<[usize]>::offset_of_value(&value));
+            assert_eq!(8, RcBox16::<[usize]>::offset_of_value(&value));
+            assert_eq!(8, RcBox32::<[usize]>::offset_of_value(&value));
+            assert_eq!(8, RcBox64::<[usize]>::offset_of_value(&value));
+            assert_eq!(8, RcBoxU::<[usize]>::offset_of_value(&value));
         }
 
         // str
         unsafe {
             let value = "Hello";
-            assert_eq!(1, RcBox::<str, u8>::offset_of_value(value));
-            assert_eq!(2, RcBox::<str, u16>::offset_of_value(value));
-            assert_eq!(4, RcBox::<str, u32>::offset_of_value(value));
-            assert_eq!(8, RcBox::<str, u64>::offset_of_value(value));
-            assert_eq!(8, RcBox::<str, usize>::offset_of_value(value));
+            assert_eq!(1, RcBox8::<str>::offset_of_value(value));
+            assert_eq!(2, RcBox16::<str>::offset_of_value(value));
+            assert_eq!(4, RcBox32::<str>::offset_of_value(value));
+            assert_eq!(8, RcBox64::<str>::offset_of_value(value));
+            assert_eq!(8, RcBoxU::<str>::offset_of_value(value));
         }
 
         // trait object
@@ -1294,11 +1285,11 @@ mod rcbox {
             struct MyStruct(u32);
             impl MyTrait for MyStruct {}
             let value = MyStruct(0);
-            assert_eq!(4, RcBox::<dyn MyTrait, u8>::offset_of_value(&value));
-            assert_eq!(4, RcBox::<dyn MyTrait, u16>::offset_of_value(&value));
-            assert_eq!(4, RcBox::<dyn MyTrait, u32>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<dyn MyTrait, u64>::offset_of_value(&value));
-            assert_eq!(8, RcBox::<dyn MyTrait, usize>::offset_of_value(&value));
+            assert_eq!(4, RcBox8::<dyn MyTrait>::offset_of_value(&value));
+            assert_eq!(4, RcBox16::<dyn MyTrait>::offset_of_value(&value));
+            assert_eq!(4, RcBox32::<dyn MyTrait>::offset_of_value(&value));
+            assert_eq!(8, RcBox64::<dyn MyTrait>::offset_of_value(&value));
+            assert_eq!(8, RcBoxU::<dyn MyTrait>::offset_of_value(&value));
         }
     }
 }
