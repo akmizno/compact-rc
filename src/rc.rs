@@ -79,9 +79,9 @@ impl<T: ?Sized, C: MarkerCounter> RcBox<T, C> {
     /// Returns a pointer to the allocated RcBox;
     /// its contents are copied from the ptr, and counter initialized.
     unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
-        let (layout, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
-        let nopad_size = layout.size();
-        let tp = std::alloc::alloc(layout.pad_to_align());
+        let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
+        let nopad_size = layout_nopad.size();
+        let tp = std::alloc::alloc(layout_nopad.pad_to_align());
         let tp = NonNull::new(tp).unwrap();
         let pvalue = tp.as_ptr().add(offset);
 
@@ -119,8 +119,8 @@ impl<T, C: MarkerCounter> RcBox<T, C> {
     /// Its values are uninitialized, but counter initialized.
     unsafe fn allocate_for_slice(len: usize) -> NonNull<RcBox<[MaybeUninit<T>], C>> {
         let layout_value = Layout::array::<T>(len).unwrap();
-        let (layout, _) = Self::layout_nopad(layout_value).unwrap();
-        let tp = std::alloc::alloc(layout);
+        let (layout_nopad, _) = Self::layout_nopad(layout_value).unwrap();
+        let tp = std::alloc::alloc(layout_nopad.pad_to_align());
         let mut tp = NonNull::new(tp).unwrap();
         // Convert thin pointer to fat pointer.
         let fp = std::ptr::slice_from_raw_parts_mut(tp.as_mut(), len);
