@@ -437,14 +437,15 @@ impl<C: MarkerCounter> From<String> for RcX<str, C> {
 }
 
 impl<C: MarkerCounter> From<&CStr> for RcX<CStr, C> {
-    fn from(_v: &CStr) -> RcX<CStr, C> {
-        todo!();
+    fn from(v: &CStr) -> RcX<CStr, C> {
+        let rc = RcX::<[u8], C>::from(v.to_bytes_with_nul());
+        unsafe { RcX::from_raw(RcX::into_raw(rc) as *const CStr) }
     }
 }
 
 impl<C: MarkerCounter> From<CString> for RcX<CStr, C> {
-    fn from(_v: CString) -> RcX<CStr, C> {
-        todo!();
+    fn from(v: CString) -> RcX<CStr, C> {
+        RcX::from(v.as_ref())
     }
 }
 
@@ -840,6 +841,25 @@ mod tests {
         let rc = Rc8::<str>::from(s);
         assert_eq!(rc.len(), 5);
         assert_eq!(&*rc, "Hello");
+    }
+
+    #[test]
+    fn from_cstr() {
+        let s = CString::new("Hello").unwrap();
+        let cs = s.as_c_str();
+        let rc = Rc8::<CStr>::from(cs);
+        let bytes = rc.to_bytes_with_nul();
+        assert_eq!(bytes.len(), 6);
+        assert_eq!(bytes, b"Hello\0");
+    }
+
+    #[test]
+    fn from_cstring() {
+        let s = CString::new("Hello").unwrap();
+        let rc = Rc8::<CStr>::from(s);
+        let bytes = rc.to_bytes_with_nul();
+        assert_eq!(bytes.len(), 6);
+        assert_eq!(bytes, b"Hello\0");
     }
 
     #[test]
