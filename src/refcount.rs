@@ -6,27 +6,25 @@ pub trait RefCount {
     /// Type of count
     type Value;
 
-    /// Creates a new counter object.
+    /// Creates a new RefCount object.
     ///
     /// The object is initialized as "one".
     fn one() -> Self;
 
-    /// Gets current refcount.
-    fn count(&self) -> Self::Value;
+    /// Checks a value equals to one.
+    fn is_one(val: &Self::Value) -> bool;
 
-    /// Returns true if current count is one.
-    fn is_one(&self) -> bool;
+    /// Gets a current value.
+    fn load(&self) -> Self::Value;
 
-    /// Increments refcount.
-    fn inc(&self);
+    /// Increments its value and returns previous value.
+    fn fetch_inc(&self) -> Self::Value;
 
-    /// Decrements refcount.
-    ///
-    /// Returns true if count after decrementation is zero, otherwise false.
-    fn dec(&self) -> bool;
+    /// Decrements its value and returns previous value.
+    fn fetch_dec(&self) -> Self::Value;
 }
 
-/// Implement Counter for Cell<$type>.
+/// Implement RefCount for Cell<$type>.
 /// Its implementors are used as single-threaded refcount.
 macro_rules! impl_cell_counter {
     ($type:ty) => {
@@ -37,29 +35,32 @@ macro_rules! impl_cell_counter {
                 Self::new(1)
             }
 
-            fn count(&self) -> Self::Value {
+            fn is_one(val: &Self::Value) -> bool {
+                *val == 1
+            }
+
+            fn load(&self) -> Self::Value {
                 self.get()
             }
 
-            fn is_one(&self) -> bool {
-                self.count() == 1
-            }
-
-            fn inc(&self) {
-                let count = self.count();
-                assume!(count != 0);
-                match count.checked_add(1) {
-                    Some(c) => self.set(c),
+            fn fetch_inc(&self) -> Self::Value {
+                let current = self.load();
+                assume!(current != 0);
+                match current.checked_add(1) {
+                    Some(c) => {
+                        self.set(c);
+                        current
+                    }
                     None => std::process::abort(),
                 }
             }
 
-            fn dec(&self) -> bool {
-                let count = self.count();
-                assume!(count != 0);
-                let c = count - 1;
+            fn fetch_dec(&self) -> Self::Value {
+                let current = self.load();
+                assume!(0 < current);
+                let c = current - 1;
                 self.set(c);
-                c == 0
+                current
             }
         }
     };
@@ -71,7 +72,7 @@ impl_cell_counter!(u32);
 impl_cell_counter!(u64);
 impl_cell_counter!(usize);
 
-/// Implement Counter for atomic $types.
+/// Implement RefCount for atomic $types.
 /// Its implementors are used as multi-threaded refcount.
 macro_rules! impl_atomic_counter {
     ($type:ty, $raw:ty) => {
@@ -82,20 +83,20 @@ macro_rules! impl_atomic_counter {
                 Self::new(1)
             }
 
-            fn count(&self) -> Self::Value {
+            fn is_one(val: &Self::Value) -> bool {
+                *val == 1
+            }
+
+            fn load(&self) -> Self::Value {
                 self.load(Ordering::Acquire)
             }
 
-            fn is_one(&self) -> bool {
-                self.count() == 1
+            fn fetch_inc(&self) -> Self::Value {
+                self.fetch_add(1, Ordering::AcqRel)
             }
 
-            fn inc(&self) {
-                self.fetch_add(1, Ordering::AcqRel);
-            }
-
-            fn dec(&self) -> bool {
-                self.fetch_sub(1, Ordering::AcqRel) == 1
+            fn fetch_dec(&self) -> Self::Value {
+                self.fetch_sub(1, Ordering::AcqRel)
             }
         }
     };

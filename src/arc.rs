@@ -55,7 +55,7 @@ where
 
     /// See [std::sync::Arc::try_unwrap].
     pub fn try_unwrap(this: Self) -> Result<T, Self> {
-        RcBase::try_unwrap_threadsafe(this.0).map_err(Self)
+        RcBase::try_unwrap(this.0).map_err(Self)
     }
 }
 
@@ -110,7 +110,7 @@ where
 {
     /// See [std::sync::Arc::make_mut].
     pub fn make_mut(this: &mut Self) -> &mut T {
-        RcBase::make_mut_threadsafe(&mut this.0)
+        RcBase::make_mut(&mut this.0)
     }
 }
 

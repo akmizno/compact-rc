@@ -23,20 +23,8 @@ struct RcBox<T: ?Sized, C> {
 }
 
 impl<T: ?Sized, C: RefCount> RcBox<T, C> {
-    fn strong(&self) -> C::Value {
-        self.strong.count()
-    }
-
-    fn is_unique(&self) -> bool {
-        self.strong.is_one()
-    }
-
-    fn inc_strong(&self) {
-        self.strong.inc();
-    }
-
-    fn dec_strong(&self) -> bool {
-        self.strong.dec()
+    fn strong(&self) -> &C {
+        &self.strong
     }
 
     unsafe fn layout_nopad(layout_value: Layout) -> Result<(Layout, usize), LayoutError> {
@@ -176,10 +164,6 @@ impl<T, C: RefCount> RcBase<T, C> {
             Err(this)
         }
     }
-
-    pub(crate) fn try_unwrap_threadsafe(this: Self) -> Result<T, Self> {
-        todo!();
-    }
 }
 
 /// Deallocate the box without dropping its contents
@@ -255,11 +239,11 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
     }
 
     pub(crate) fn strong_count(this: &Self) -> C::Value {
-        this.inner().strong()
+        this.inner().strong().load()
     }
 
     fn is_unique(this: &Self) -> bool {
-        this.inner().is_unique()
+        C::is_one(&Self::strong_count(this))
     }
 
     pub(crate) fn get_mut(this: &mut Self) -> Option<&mut T> {
@@ -281,10 +265,6 @@ impl<T: Clone, C: RefCount> RcBase<T, C> {
             *this = Self::new((**this).clone());
         }
         unsafe { Self::get_mut(this).unwrap_unchecked() }
-    }
-
-    pub(crate) fn make_mut_threadsafe(this: &mut Self) -> &mut T {
-        todo!();
     }
 }
 
@@ -312,7 +292,7 @@ impl<T: ?Sized, C: RefCount> Deref for RcBase<T, C> {
 
 impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
     fn drop(&mut self) {
-        if self.inner().dec_strong() {
+        if C::is_one(&self.inner().strong().fetch_dec()) {
             unsafe {
                 drop(Box::from_raw(self.ptr.as_mut()));
             }
@@ -322,7 +302,7 @@ impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
 
 impl<T: ?Sized, C: RefCount> Clone for RcBase<T, C> {
     fn clone(&self) -> RcBase<T, C> {
-        self.inner().inc_strong();
+        self.inner().strong().fetch_inc();
         unsafe { Self::from_inner(self.ptr) }
     }
 }
