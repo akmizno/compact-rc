@@ -26,10 +26,10 @@ pub type Rc<T> = RcX<T, usize>;
 
 /// Low-memory version of [std::rc::Rc].
 ///
-/// This type provides almost the same methods as standard `Rc`.
-/// See its documentation to know detailed usage.
+/// A type provides almost the same methods as standard `Rc`.
+/// See [the top page](crate) for about differences from the standard `Rc`.
 ///
-/// There are several aliases for simplicity.
+/// There are aliases for simplicity.
 /// - [Rc]
 /// - [Rc8]
 /// - [Rc16]

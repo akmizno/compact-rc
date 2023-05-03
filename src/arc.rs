@@ -27,9 +27,9 @@ pub type Arc<T> = ArcX<T, AtomicUsize>;
 /// Low-memory version of [std::sync::Arc].
 ///
 /// This type provides almost the same methods as standard `Arc`.
-/// See its documentation to know detailed usage.
+/// See [the top page](crate) for about differences from the standard `Arc`.
 ///
-/// There are several aliases for simplicity.
+/// There are aliases for simplicity.
 /// - [Arc]
 /// - [Arc8]
 /// - [Arc16]

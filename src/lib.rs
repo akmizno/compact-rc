@@ -1,6 +1,7 @@
 //! Low-memory reference-counting pointers.
 //!
-//! The types in this crate have almost the same methods as standard `Rc`.
+//! The types in this crate have almost the same methods as standard [Rc](std::rc::Rc) and
+//! [Arc](std::sync::Arc).
 //! The differences from the standard type is as follows:
 //!
 //! - Weak reference is not supported.
@@ -16,7 +17,7 @@
 //! ## Warnings
 //! Using this crate with dynamically sized types (DSTs) like `Rc<str>` is not recommended.
 //! Some implementations in this crate rely on unspecified layout of fat pointer.
-//! So, DSTs may cause problems if the layout is changed in the future compiler.
+//! So, DSTs may cause problems if the layout is changed in the future.
 //!
 //! # Sample code
 //! ```
@@ -53,6 +54,7 @@ pub use arc::Arc16;
 pub use arc::Arc32;
 pub use arc::Arc64;
 pub use arc::Arc8;
+
 pub use rc::Rc;
 pub use rc::Rc16;
 pub use rc::Rc32;

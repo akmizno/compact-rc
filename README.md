@@ -1,7 +1,7 @@
 # compact-rc
 Low-memory reference-counting pointers.
 
-The types in this crate have almost the same methods as standard `Rc`.
+The types in this crate have almost the same methods as standard `Rc` and `Arc`.
 The differences from the standard type is as follows:
 
 - Weak reference is not supported.
@@ -17,7 +17,7 @@ Due to the differences, some methods such as `weak_count` are not provided.
 ## Warnings
 Using this crate with dynamically sized types (DSTs) like `Rc<str>` is not recommended.
 Some implementations in this crate rely on unspecified layout of fat pointer.
-So, DSTs may cause problems if the layout is changed in the future compiler.
+So, DSTs may cause problems if the layout is changed in the future.
 
 # Sample code
 ```rust
