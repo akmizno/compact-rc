@@ -41,6 +41,7 @@
 //! ```
 #[macro_use]
 mod macros;
+mod base;
 mod maybe_fat;
 
 pub mod rc;
