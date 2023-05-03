@@ -48,6 +48,11 @@ pub mod arc;
 pub mod rc;
 pub mod refcount;
 
+pub use arc::Arc;
+pub use arc::Arc16;
+pub use arc::Arc32;
+pub use arc::Arc64;
+pub use arc::Arc8;
 pub use rc::Rc;
 pub use rc::Rc16;
 pub use rc::Rc32;
