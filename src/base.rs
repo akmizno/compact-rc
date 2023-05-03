@@ -172,12 +172,12 @@ unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
 }
 
 impl<T: ?Sized, C: RefCount> RcBase<T, C> {
-    fn inner(&self) -> &RcBox<T, C> {
-        unsafe { self.ptr.as_ref() }
+    unsafe fn inner(&self) -> &RcBox<T, C> {
+        self.ptr.as_ref()
     }
 
-    fn inner_mut(&mut self) -> &mut RcBox<T, C> {
-        unsafe { self.ptr.as_mut() }
+    unsafe fn inner_mut(&mut self) -> &mut RcBox<T, C> {
+        self.ptr.as_mut()
     }
 
     unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
@@ -239,16 +239,20 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
     }
 
     pub(crate) fn strong_count(this: &Self) -> C::Value {
-        this.inner().strong().load()
+        unsafe { this.inner().strong().load() }
     }
 
     fn is_unique(this: &Self) -> bool {
         C::is_one(&Self::strong_count(this))
     }
 
+    unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
+        &mut this.inner_mut().value
+    }
+
     pub(crate) fn get_mut(this: &mut Self) -> Option<&mut T> {
         if Self::is_unique(this) {
-            Some(&mut this.inner_mut().value)
+            Some(unsafe { Self::get_mut_unchecked(this) })
         } else {
             None
         }
@@ -264,7 +268,7 @@ impl<T: Clone, C: RefCount> RcBase<T, C> {
         if !Self::is_unique(this) {
             *this = Self::new((**this).clone());
         }
-        unsafe { Self::get_mut(this).unwrap_unchecked() }
+        unsafe { Self::get_mut_unchecked(this) }
     }
 }
 
@@ -286,14 +290,14 @@ impl<T: ?Sized, C: RefCount> Deref for RcBase<T, C> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        &self.inner().value
+        unsafe { &self.inner().value }
     }
 }
 
 impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
     fn drop(&mut self) {
-        if C::is_one(&self.inner().strong().fetch_dec()) {
-            unsafe {
+        unsafe {
+            if C::is_one(&self.inner().strong().fetch_dec()) {
                 drop(Box::from_raw(self.ptr.as_mut()));
             }
         }
@@ -302,8 +306,10 @@ impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
 
 impl<T: ?Sized, C: RefCount> Clone for RcBase<T, C> {
     fn clone(&self) -> RcBase<T, C> {
-        self.inner().strong().fetch_inc();
-        unsafe { Self::from_inner(self.ptr) }
+        unsafe {
+            self.inner().strong().fetch_inc();
+            Self::from_inner(self.ptr)
+        }
     }
 }
 
