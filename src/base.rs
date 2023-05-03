@@ -949,6 +949,42 @@ mod leak_ckeck {
     }
 
     #[test]
+    fn send() {
+        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        let rc = Arc8::new(DropCount::new(&DROP_COUNT));
+
+        let rc2 = rc.clone();
+        let th = thread::spawn(move || {
+            drop(rc2);
+        });
+
+        drop(rc);
+
+        th.join().unwrap();
+
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn sync() {
+        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        let rc = Arc8::new(DropCount::new(&DROP_COUNT));
+
+        thread::scope(|s| {
+            s.spawn(|| {
+                let rc2 = rc.clone();
+                drop(rc2);
+                assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 0);
+            });
+        });
+
+        drop(rc);
+        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn single() {
         let drop_count = AtomicUsize::new(0);
         let rc = Rc8::new(DropCount::new(&drop_count));
