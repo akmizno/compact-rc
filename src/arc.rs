@@ -7,7 +7,6 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter;
 use std::ops::Deref;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize};
 
@@ -40,26 +39,23 @@ pub struct ArcX<T: ?Sized, C>(RcBase<T, C>)
 where
     C: RefCount + Sync + Send;
 
-impl<T: RefUnwindSafe + ?Sized, C> UnwindSafe for ArcX<T, C> where C: RefCount + Sync + Send {}
-impl<T: RefUnwindSafe + ?Sized, C> RefUnwindSafe for ArcX<T, C> where C: RefCount + Sync + Send {}
-
 impl<T, C> ArcX<T, C>
 where
     C: RefCount + Sync + Send,
 {
-    /// See [std::rc::Rc::new].
+    /// See [std::sync::Arc::new].
     pub fn new(value: T) -> ArcX<T, C> {
         ArcX(RcBase::new(value))
     }
 
-    /// See [std::rc::Rc::pin].
+    /// See [std::sync::Arc::pin].
     pub fn pin(value: T) -> Pin<ArcX<T, C>> {
         unsafe { Pin::new_unchecked(Self::new(value)) }
     }
 
-    /// See [std::rc::Rc::try_unwrap].
+    /// See [std::sync::Arc::try_unwrap].
     pub fn try_unwrap(this: Self) -> Result<T, Self> {
-        RcBase::try_unwrap(this.0).map_err(Self)
+        RcBase::try_unwrap_threadsafe(this.0).map_err(Self)
     }
 }
 
@@ -67,42 +63,42 @@ impl<T: ?Sized, C> ArcX<T, C>
 where
     C: RefCount + Sync + Send,
 {
-    /// See [std::rc::Rc::as_ptr].
+    /// See [std::sync::Arc::as_ptr].
     pub fn as_ptr(this: &Self) -> *const T {
         RcBase::as_ptr(&this.0)
     }
 
-    /// See [std::rc::Rc::into_raw].
+    /// See [std::sync::Arc::into_raw].
     pub fn into_raw(this: Self) -> *const T {
         RcBase::into_raw(this.0)
     }
 
-    /// See [std::rc::Rc::from_raw].
+    /// See [std::sync::Arc::from_raw].
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self(RcBase::from_raw(ptr))
     }
 
-    /// See [std::rc::Rc::increment_strong_count].
+    /// See [std::sync::Arc::increment_strong_count].
     pub unsafe fn increment_strong_count(ptr: *const T) {
         RcBase::<T, C>::increment_strong_count(ptr)
     }
 
-    /// See [std::rc::Rc::decrement_strong_count].
+    /// See [std::sync::Arc::decrement_strong_count].
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         RcBase::<T, C>::decrement_strong_count(ptr)
     }
 
-    /// See [std::rc::Rc::strong_count].
+    /// See [std::sync::Arc::strong_count].
     pub fn strong_count(this: &Self) -> <C as RefCount>::Value {
         RcBase::strong_count(&this.0)
     }
 
-    /// See [std::rc::Rc::get_mut].
+    /// See [std::sync::Arc::get_mut].
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
         RcBase::get_mut(&mut this.0)
     }
 
-    /// See [std::rc::Rc::ptr_eq].
+    /// See [std::sync::Arc::ptr_eq].
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
         RcBase::ptr_eq(&this.0, &other.0)
     }
@@ -112,9 +108,9 @@ impl<T: Clone, C> ArcX<T, C>
 where
     C: RefCount + Sync + Send,
 {
-    /// See [std::rc::Rc::make_mut].
+    /// See [std::sync::Arc::make_mut].
     pub fn make_mut(this: &mut Self) -> &mut T {
-        RcBase::make_mut(&mut this.0)
+        RcBase::make_mut_threadsafe(&mut this.0)
     }
 }
 
@@ -122,7 +118,7 @@ impl<C> ArcX<dyn Any, C>
 where
     C: RefCount + Sync + Send,
 {
-    /// See [std::rc::Rc::downcast].
+    /// See [std::sync::Arc::downcast].
     pub fn downcast<T: Any>(self) -> Result<ArcX<T, C>, ArcX<dyn Any, C>> {
         self.0.downcast::<T>().map(ArcX::<T, C>).map_err(Self)
     }
@@ -359,8 +355,6 @@ where
         self.0.as_ref()
     }
 }
-
-impl<T: ?Sized, C> Unpin for ArcX<T, C> where C: RefCount + Sync + Send {}
 
 #[cfg(test)]
 mod tests {

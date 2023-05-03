@@ -8,7 +8,6 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter;
 use std::ops::Deref;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::pin::Pin;
 
 use crate::base::RcBase;
@@ -39,9 +38,6 @@ pub type Rc<T> = RcX<T, usize>;
 pub struct RcX<T: ?Sized, C>(RcBase<T, Cell<C>>)
 where
     Cell<C>: RefCount;
-
-impl<T: RefUnwindSafe + ?Sized, C> UnwindSafe for RcX<T, C> where Cell<C>: RefCount {}
-impl<T: RefUnwindSafe + ?Sized, C> RefUnwindSafe for RcX<T, C> where Cell<C>: RefCount {}
 
 impl<T, C> RcX<T, C>
 where
@@ -359,8 +355,6 @@ where
         self.0.as_ref()
     }
 }
-
-impl<T: ?Sized, C> Unpin for RcX<T, C> where Cell<C>: RefCount {}
 
 #[cfg(test)]
 mod tests {

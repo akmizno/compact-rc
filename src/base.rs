@@ -115,13 +115,26 @@ impl<T, C: RefCount> RcBox<T, C> {
     }
 }
 
-/// Base type of [RcBase]
+/// Base type of [RcX] and [ArcX]
 pub(crate) struct RcBase<T: ?Sized, C: RefCount> {
     ptr: NonNull<RcBox<T, C>>,
 
     // NOTE PhantomData for dropck.
     // This field indicates that this struct owns the data of type RcBox<T, C>.
     _phantom: PhantomData<RcBox<T, C>>,
+}
+
+unsafe impl<T, C> Send for RcBase<T, C>
+where
+    T: ?Sized + Sync + Send,
+    C: RefCount + Sync + Send,
+{
+}
+unsafe impl<T, C> Sync for RcBase<T, C>
+where
+    T: ?Sized + Sync + Send,
+    C: RefCount + Sync + Send,
+{
 }
 
 impl<T: RefUnwindSafe + ?Sized, C: RefCount> UnwindSafe for RcBase<T, C> {}
@@ -162,6 +175,10 @@ impl<T, C: RefCount> RcBase<T, C> {
         } else {
             Err(this)
         }
+    }
+
+    pub(crate) fn try_unwrap_threadsafe(this: Self) -> Result<T, Self> {
+        todo!();
     }
 }
 
@@ -264,6 +281,10 @@ impl<T: Clone, C: RefCount> RcBase<T, C> {
             *this = Self::new((**this).clone());
         }
         unsafe { Self::get_mut(this).unwrap_unchecked() }
+    }
+
+    pub(crate) fn make_mut_threadsafe(this: &mut Self) -> &mut T {
+        todo!();
     }
 }
 
