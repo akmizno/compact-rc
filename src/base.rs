@@ -927,86 +927,85 @@ mod tests {
 mod leak_ckeck {
     use super::*;
     use std::cell::Cell;
+    use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+    use std::thread;
 
     type Rc8<T> = RcBase<T, Cell<u8>>;
+    type Arc8<T> = RcBase<T, AtomicU8>;
 
     struct DropCount<'a> {
-        drop_count: &'a mut usize,
+        drop_count: &'a AtomicUsize,
     }
     impl<'a> DropCount<'a> {
-        fn new(drop_count: &'a mut usize) -> Self {
+        fn new(drop_count: &'a AtomicUsize) -> Self {
             DropCount { drop_count }
         }
     }
 
     impl<'a> Drop for DropCount<'a> {
         fn drop(&mut self) {
-            *self.drop_count += 1;
+            self.drop_count.fetch_add(1, Ordering::SeqCst);
         }
     }
 
     #[test]
     fn single() {
-        let mut drop_count = 0;
-        let rc = Rc8::new(DropCount {
-            drop_count: &mut drop_count,
-        });
+        let drop_count = AtomicUsize::new(0);
+        let rc = Rc8::new(DropCount::new(&drop_count));
         drop(rc);
-        assert_eq!(drop_count, 1);
+        assert_eq!(drop_count.into_inner(), 1);
     }
 
     #[test]
     fn clone() {
-        let mut drop_count = 0;
-        let rc = Rc8::new(DropCount {
-            drop_count: &mut drop_count,
-        });
+        let drop_count = AtomicUsize::new(0);
+        let rc = Rc8::new(DropCount::new(&drop_count));
         let rc2 = rc.clone();
         drop(rc);
         drop(rc2);
-        assert_eq!(drop_count, 1);
+        assert_eq!(drop_count.into_inner(), 1);
     }
 
     #[test]
     fn try_unwrap() {
         {
-            let mut drop_count = 0;
+            let drop_count = AtomicUsize::new(0);
             {
-                let rc = Rc8::new(DropCount::new(&mut drop_count));
+                let rc = Rc8::new(DropCount::new(&drop_count));
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_ok());
             }
-            assert_eq!(drop_count, 1);
+            assert_eq!(drop_count.into_inner(), 1);
         }
 
         {
-            let mut drop_count = 0;
+            let drop_count = AtomicUsize::new(0);
             {
-                let rc = Rc8::new(DropCount::new(&mut drop_count));
+                let rc = Rc8::new(DropCount::new(&drop_count));
                 let _rc2 = rc.clone();
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_err());
             }
-            assert_eq!(drop_count, 1);
+            assert_eq!(drop_count.into_inner(), 1);
         }
 
         {
-            let mut drop_count = 0;
+            let drop_count = AtomicUsize::new(0);
             {
-                let rc = Rc8::new(DropCount::new(&mut drop_count));
+                let rc = Rc8::new(DropCount::new(&drop_count));
                 let rc2 = rc.clone();
                 drop(rc2);
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_ok());
             }
-            assert_eq!(drop_count, 1);
+            assert_eq!(drop_count.into_inner(), 1);
         }
     }
 
     #[test]
     fn increment_decrement_strong_count() {
-        let mut drop_count = 0;
-        let rc = Rc8::new(DropCount::new(&mut drop_count));
+        let drop_count = AtomicUsize::new(0);
+        let rc = Rc8::new(DropCount::new(&drop_count));
         let rc2 = rc.clone();
         let ptr = Rc8::into_raw(rc2);
 
@@ -1020,71 +1019,71 @@ mod leak_ckeck {
         }
         drop(rc);
 
-        assert_eq!(drop_count, 1);
+        assert_eq!(drop_count.into_inner(), 1);
     }
 
     #[test]
     fn from_box() {
-        let mut drop_count = 0;
-        let b = Box::new(DropCount::new(&mut drop_count));
+        let drop_count = AtomicUsize::new(0);
+        let b = Box::new(DropCount::new(&drop_count));
         let rc = Rc8::<DropCount>::from(b);
         drop(rc);
-        assert_eq!(drop_count, 1);
+        assert_eq!(drop_count.into_inner(), 1);
     }
 
     #[test]
     fn from_vec() {
-        let mut drop_counts0 = 0;
-        let mut drop_counts1 = 0;
-        let mut drop_counts2 = 0;
-        let mut drop_counts3 = 0;
-        let mut drop_counts4 = 0;
+        let drop_counts0 = AtomicUsize::new(0);
+        let drop_counts1 = AtomicUsize::new(0);
+        let drop_counts2 = AtomicUsize::new(0);
+        let drop_counts3 = AtomicUsize::new(0);
+        let drop_counts4 = AtomicUsize::new(0);
 
         {
             let v = vec![
-                DropCount::new(&mut drop_counts0),
-                DropCount::new(&mut drop_counts1),
-                DropCount::new(&mut drop_counts2),
-                DropCount::new(&mut drop_counts3),
-                DropCount::new(&mut drop_counts4),
+                DropCount::new(&drop_counts0),
+                DropCount::new(&drop_counts1),
+                DropCount::new(&drop_counts2),
+                DropCount::new(&drop_counts3),
+                DropCount::new(&drop_counts4),
             ];
             let rc = Rc8::<[DropCount]>::from(v);
             assert_eq!(rc.len(), 5);
         }
 
-        assert_eq!(drop_counts0, 1);
-        assert_eq!(drop_counts1, 1);
-        assert_eq!(drop_counts2, 1);
-        assert_eq!(drop_counts3, 1);
-        assert_eq!(drop_counts4, 1);
+        assert_eq!(drop_counts0.into_inner(), 1);
+        assert_eq!(drop_counts1.into_inner(), 1);
+        assert_eq!(drop_counts2.into_inner(), 1);
+        assert_eq!(drop_counts3.into_inner(), 1);
+        assert_eq!(drop_counts4.into_inner(), 1);
     }
 
     #[test]
     fn from_iter() {
-        let mut drop_counts0 = 0;
-        let mut drop_counts1 = 0;
-        let mut drop_counts2 = 0;
-        let mut drop_counts3 = 0;
-        let mut drop_counts4 = 0;
+        let drop_counts0 = AtomicUsize::new(0);
+        let drop_counts1 = AtomicUsize::new(0);
+        let drop_counts2 = AtomicUsize::new(0);
+        let drop_counts3 = AtomicUsize::new(0);
+        let drop_counts4 = AtomicUsize::new(0);
 
         {
             let v = vec![
-                DropCount::new(&mut drop_counts0),
-                DropCount::new(&mut drop_counts1),
-                DropCount::new(&mut drop_counts2),
-                DropCount::new(&mut drop_counts3),
-                DropCount::new(&mut drop_counts4),
+                DropCount::new(&drop_counts0),
+                DropCount::new(&drop_counts1),
+                DropCount::new(&drop_counts2),
+                DropCount::new(&drop_counts3),
+                DropCount::new(&drop_counts4),
             ];
 
             let rc = Rc8::<[DropCount]>::from_iter(v.into_iter());
             assert_eq!(rc.len(), 5);
         }
 
-        assert_eq!(drop_counts0, 1);
-        assert_eq!(drop_counts1, 1);
-        assert_eq!(drop_counts2, 1);
-        assert_eq!(drop_counts3, 1);
-        assert_eq!(drop_counts4, 1);
+        assert_eq!(drop_counts0.into_inner(), 1);
+        assert_eq!(drop_counts1.into_inner(), 1);
+        assert_eq!(drop_counts2.into_inner(), 1);
+        assert_eq!(drop_counts3.into_inner(), 1);
+        assert_eq!(drop_counts4.into_inner(), 1);
     }
 }
 
