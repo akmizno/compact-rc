@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 /// Trait for refcount
 pub trait RefCount {
@@ -69,3 +70,39 @@ impl_cell_counter!(u16);
 impl_cell_counter!(u32);
 impl_cell_counter!(u64);
 impl_cell_counter!(usize);
+
+/// Implement Counter for atomic $types.
+/// Its implementors are used as multi-threaded refcount.
+macro_rules! impl_atomic_counter {
+    ($type:ty, $raw:ty) => {
+        impl RefCount for $type {
+            type Value = $raw;
+
+            fn one() -> Self {
+                Self::new(1)
+            }
+
+            fn count(&self) -> Self::Value {
+                self.load(Ordering::Acquire)
+            }
+
+            fn is_one(&self) -> bool {
+                self.count() == 1
+            }
+
+            fn inc(&self) {
+                self.fetch_add(1, Ordering::AcqRel);
+            }
+
+            fn dec(&self) -> bool {
+                self.fetch_sub(1, Ordering::AcqRel) == 1
+            }
+        }
+    };
+}
+
+impl_atomic_counter!(AtomicU8, u8);
+impl_atomic_counter!(AtomicU16, u16);
+impl_atomic_counter!(AtomicU32, u32);
+impl_atomic_counter!(AtomicU64, u64);
+impl_atomic_counter!(AtomicUsize, usize);
