@@ -75,9 +75,9 @@ impl_cell_counter!(usize);
 /// Implement RefCount for atomic $types.
 /// Its implementors are used as multi-threaded refcount.
 macro_rules! impl_atomic_counter {
-    ($type:ty, $raw:ty) => {
+    ($type:ty, $value_type:ty) => {
         impl RefCount for $type {
-            type Value = $raw;
+            type Value = $value_type;
 
             fn one() -> Self {
                 Self::new(1)
