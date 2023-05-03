@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Akira Mizuno <akmizno@gmail.com>"]
 description = "Low-memory reference-counting pointers"
 keywords = ["arc", "rc", "data-structure"]
-categories = ["data-structures", "Concurrency"]
+categories = ["data-structures"]
 repository = "https://github.com/akmizno/compact-rc"
 license = "MIT/Apache-2.0"
 
