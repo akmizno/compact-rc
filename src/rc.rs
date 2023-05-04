@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::borrow;
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -111,16 +110,6 @@ where
     /// See [std::rc::Rc::make_mut].
     pub fn make_mut(this: &mut Self) -> &mut T {
         RcBase::make_mut(&mut this.0)
-    }
-}
-
-impl<C> RcX<dyn Any, C>
-where
-    Cell<C>: RefCount,
-{
-    /// See [std::rc::Rc::downcast].
-    pub fn downcast<T: Any>(self) -> Result<RcX<T, C>, RcX<dyn Any, C>> {
-        self.0.downcast::<T>().map(RcX::<T, C>).map_err(Self)
     }
 }
 
@@ -275,7 +264,7 @@ where
     }
 }
 
-impl<T: ?Sized, C> From<Box<T>> for RcX<T, C>
+impl<T, C> From<Box<T>> for RcX<T, C>
 where
     Cell<C>: RefCount,
 {

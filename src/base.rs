@@ -1,5 +1,4 @@
 use std::alloc::{Layout, LayoutError};
-use std::any::Any;
 use std::borrow;
 use std::cmp::Ordering;
 use std::ffi::{CStr, CString};
@@ -272,20 +271,6 @@ impl<T: Clone, C: RefCount> RcBase<T, C> {
     }
 }
 
-impl<C: RefCount> RcBase<dyn Any, C> {
-    pub(crate) fn downcast<T: Any>(self) -> Result<RcBase<T, C>, RcBase<dyn Any, C>> {
-        if (*self).is::<T>() {
-            unsafe {
-                let ptr = self.ptr.cast::<RcBox<T, C>>();
-                mem::forget(self);
-                Ok(RcBase::from_inner(ptr))
-            }
-        } else {
-            Err(self)
-        }
-    }
-}
-
 impl<T: ?Sized, C: RefCount> Deref for RcBase<T, C> {
     type Target = T;
 
@@ -415,7 +400,7 @@ impl<C: RefCount> From<CString> for RcBase<CStr, C> {
     }
 }
 
-impl<T: ?Sized, C: RefCount> From<Box<T>> for RcBase<T, C> {
+impl<T, C: RefCount> From<Box<T>> for RcBase<T, C> {
     fn from(b: Box<T>) -> RcBase<T, C> {
         unsafe { RcBase::from_box(b) }
     }
@@ -700,29 +685,6 @@ mod tests {
     }
 
     #[test]
-    fn downcast() {
-        // NOTE RcBase<dyn Any> can not be initialized directly because
-        // the CoearseUnsized is unstable.
-
-        {
-            let s = String::from("Hello");
-            let b: Box<dyn Any> = Box::new(s);
-            let rc: Rc8<dyn Any> = Rc8::from(b);
-            let rc = rc.downcast::<String>();
-            assert!(rc.is_ok());
-            assert_eq!(*rc.unwrap(), "Hello");
-        }
-
-        {
-            let d = 1i32;
-            let b: Box<dyn Any> = Box::new(d);
-            let rc: Rc8<dyn Any> = Rc8::from(b);
-            let rc = rc.downcast::<String>();
-            assert!(rc.is_err());
-        }
-    }
-
-    #[test]
     fn from_t() {
         let value: String = "hello".to_string();
         let rc = Rc8::<String>::from(value);
@@ -872,20 +834,9 @@ mod tests {
 
     #[test]
     fn from_box() {
-        let b = Box::<str>::from("Hello");
-        let rc = Rc8::<str>::from(b);
+        let b = Box::<String>::from("Hello".to_string());
+        let rc = Rc8::<String>::from(b);
         assert_eq!(&*rc, "Hello");
-    }
-
-    #[test]
-    fn from_large_box() {
-        let v = (0..1000).collect::<Vec<_>>();
-        let b = v.into_boxed_slice();
-        let rc = Rc8::<[i64]>::from(b);
-        assert_eq!(rc.len(), 1000);
-        for i in 0..1000 {
-            assert_eq!(rc[i], i as i64);
-        }
     }
 
     #[test]
