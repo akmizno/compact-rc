@@ -375,10 +375,9 @@ impl<T: Clone, C: RefCount> From<&[T]> for RcBase<[T], C> {
 }
 
 impl<C: RefCount> From<&str> for RcBase<str, C> {
-    fn from(_s: &str) -> RcBase<str, C> {
-        // let rc = RcBase::<[u8], C>::from(s.as_bytes());
-        // unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const str) }
-        todo!();
+    fn from(s: &str) -> RcBase<str, C> {
+        let rc = RcBase::<[u8], C>::from(s.as_bytes());
+        unsafe { mem::transmute(rc) }
     }
 }
 
@@ -389,10 +388,9 @@ impl<C: RefCount> From<String> for RcBase<str, C> {
 }
 
 impl<C: RefCount> From<&CStr> for RcBase<CStr, C> {
-    fn from(_s: &CStr) -> RcBase<CStr, C> {
-        // let rc = RcBase::<[u8], C>::from(s.to_bytes_with_nul());
-        // unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const CStr) }
-        todo!();
+    fn from(s: &CStr) -> RcBase<CStr, C> {
+        let rc = RcBase::<[u8], C>::from(s.to_bytes_with_nul());
+        unsafe { mem::transmute(rc) }
     }
 }
 
@@ -428,9 +426,8 @@ impl<T, C: RefCount> From<Vec<T>> for RcBase<[T], C> {
 }
 
 impl<C: RefCount> From<RcBase<str, C>> for RcBase<[u8], C> {
-    fn from(_rc: RcBase<str, C>) -> Self {
-        // unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const [u8]) }
-        todo!();
+    fn from(rc: RcBase<str, C>) -> Self {
+        unsafe { mem::transmute(rc) }
     }
 }
 
