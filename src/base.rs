@@ -170,14 +170,12 @@ impl<T, C: RefCount> RcBase<T, C> {
 
         let offset = RcBox::<T, C>::offset_of_value(&*ptr);
 
-        // Fix address of the pointer.
-        let address = ptr as usize;
-        assume!(offset <= address);
-        let pbox = address - offset;
+        // Get address of the RcBox.
+        let value_addr = ptr as usize;
+        assume!(offset <= value_addr);
+        let box_addr = value_addr - offset;
 
-        // Reinterpret the pptr as a pointer to RcBox.
-        let pbox = pbox as *mut RcBox<T, C>;
-
+        let pbox = box_addr as *mut RcBox<T, C>;
         Self::from_inner(NonNull::new(pbox).unwrap_unchecked())
     }
 
