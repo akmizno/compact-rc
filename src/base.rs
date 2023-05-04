@@ -163,28 +163,6 @@ impl<T, C: RefCount> RcBase<T, C> {
             Err(this)
         }
     }
-}
-
-/// Deallocate the box without dropping its contents
-unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
-    let _drop = Box::from_raw(Box::into_raw(v) as *mut ManuallyDrop<T>);
-}
-
-impl<T: ?Sized, C: RefCount> RcBase<T, C> {
-    unsafe fn inner(&self) -> &RcBox<T, C> {
-        self.ptr.as_ref()
-    }
-
-    unsafe fn inner_mut(&mut self) -> &mut RcBox<T, C> {
-        self.ptr.as_mut()
-    }
-
-    unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
-        Self {
-            ptr,
-            _phantom: PhantomData,
-        }
-    }
 
     unsafe fn from_box(v: Box<T>) -> RcBase<T, C> {
         let ptr = v.as_ref() as *const T;
@@ -193,17 +171,6 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
         deallocate_box(v);
 
         RcBase::from_inner(inner)
-    }
-
-    pub(crate) fn as_ptr(this: &Self) -> *const T {
-        // The value should be initialized.
-        unsafe { &(*NonNull::as_ptr(this.ptr)).value }
-    }
-
-    pub(crate) fn into_raw(this: Self) -> *const T {
-        let ptr = Self::as_ptr(&this);
-        mem::forget(this);
-        ptr
     }
 
     pub(crate) unsafe fn from_raw(ptr: *const T) -> Self {
@@ -235,6 +202,39 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
         let rc = Self::from_raw(ptr);
         // Decrement the refcount by dropping it.
         drop(rc);
+    }
+}
+
+/// Deallocate the box without dropping its contents
+unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
+    let _drop = Box::from_raw(Box::into_raw(v) as *mut ManuallyDrop<T>);
+}
+
+impl<T: ?Sized, C: RefCount> RcBase<T, C> {
+    unsafe fn inner(&self) -> &RcBox<T, C> {
+        self.ptr.as_ref()
+    }
+
+    unsafe fn inner_mut(&mut self) -> &mut RcBox<T, C> {
+        self.ptr.as_mut()
+    }
+
+    unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
+        Self {
+            ptr,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub(crate) fn as_ptr(this: &Self) -> *const T {
+        // The value should be initialized.
+        unsafe { &(*NonNull::as_ptr(this.ptr)).value }
+    }
+
+    pub(crate) fn into_raw(this: Self) -> *const T {
+        let ptr = Self::as_ptr(&this);
+        mem::forget(this);
+        ptr
     }
 
     pub(crate) fn strong_count(this: &Self) -> C::Value {
@@ -375,9 +375,10 @@ impl<T: Clone, C: RefCount> From<&[T]> for RcBase<[T], C> {
 }
 
 impl<C: RefCount> From<&str> for RcBase<str, C> {
-    fn from(s: &str) -> RcBase<str, C> {
-        let rc = RcBase::<[u8], C>::from(s.as_bytes());
-        unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const str) }
+    fn from(_s: &str) -> RcBase<str, C> {
+        // let rc = RcBase::<[u8], C>::from(s.as_bytes());
+        // unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const str) }
+        todo!();
     }
 }
 
@@ -388,9 +389,10 @@ impl<C: RefCount> From<String> for RcBase<str, C> {
 }
 
 impl<C: RefCount> From<&CStr> for RcBase<CStr, C> {
-    fn from(s: &CStr) -> RcBase<CStr, C> {
-        let rc = RcBase::<[u8], C>::from(s.to_bytes_with_nul());
-        unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const CStr) }
+    fn from(_s: &CStr) -> RcBase<CStr, C> {
+        // let rc = RcBase::<[u8], C>::from(s.to_bytes_with_nul());
+        // unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const CStr) }
+        todo!();
     }
 }
 
@@ -426,8 +428,9 @@ impl<T, C: RefCount> From<Vec<T>> for RcBase<[T], C> {
 }
 
 impl<C: RefCount> From<RcBase<str, C>> for RcBase<[u8], C> {
-    fn from(rc: RcBase<str, C>) -> Self {
-        unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const [u8]) }
+    fn from(_rc: RcBase<str, C>) -> Self {
+        // unsafe { RcBase::from_raw(RcBase::into_raw(rc) as *const [u8]) }
+        todo!();
     }
 }
 

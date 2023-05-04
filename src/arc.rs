@@ -56,21 +56,6 @@ where
     pub fn try_unwrap(this: Self) -> Result<T, Self> {
         RcBase::try_unwrap(this.0).map_err(Self)
     }
-}
-
-impl<T: ?Sized, C> ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    /// See [std::sync::Arc::as_ptr].
-    pub fn as_ptr(this: &Self) -> *const T {
-        RcBase::as_ptr(&this.0)
-    }
-
-    /// See [std::sync::Arc::into_raw].
-    pub fn into_raw(this: Self) -> *const T {
-        RcBase::into_raw(this.0)
-    }
 
     /// See [std::sync::Arc::from_raw].
     pub unsafe fn from_raw(ptr: *const T) -> Self {
@@ -85,6 +70,21 @@ where
     /// See [std::sync::Arc::decrement_strong_count].
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         RcBase::<T, C>::decrement_strong_count(ptr)
+    }
+}
+
+impl<T: ?Sized, C> ArcX<T, C>
+where
+    C: RefCount + Sync + Send,
+{
+    /// See [std::sync::Arc::as_ptr].
+    pub fn as_ptr(this: &Self) -> *const T {
+        RcBase::as_ptr(&this.0)
+    }
+
+    /// See [std::sync::Arc::into_raw].
+    pub fn into_raw(this: Self) -> *const T {
+        RcBase::into_raw(this.0)
     }
 
     /// See [std::sync::Arc::strong_count].
