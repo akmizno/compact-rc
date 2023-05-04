@@ -70,16 +70,16 @@ impl<T, C: RefCount> RcBox<T, C> {
     unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
         let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
         let nopad_size = layout_nopad.size();
-        let pthin = std::alloc::alloc(layout_nopad.pad_to_align());
-        let pthin = NonNull::new(pthin).unwrap();
-        let pvalue = pthin.as_ptr().add(offset);
+        let palloc = std::alloc::alloc(layout_nopad.pad_to_align());
+        let palloc = NonNull::new(palloc).unwrap();
+        let pvalue = palloc.as_ptr().add(offset);
 
-        // memcpy the contents.
+        // memcpy the content.
         assume!(offset <= nopad_size);
         let copy_size = nopad_size - offset;
         std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue, copy_size);
 
-        let mut pbox = pthin.cast::<RcBox<T, C>>();
+        let mut pbox = palloc.cast::<RcBox<T, C>>();
 
         // Initialize the counter
         std::ptr::write(&mut pbox.as_mut().strong, C::one());
