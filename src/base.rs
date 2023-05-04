@@ -12,7 +12,6 @@ use std::ops::Deref;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::ptr::NonNull;
 
-use crate::maybe_fat::MaybeFatPtr;
 use crate::refcount::RefCount;
 
 #[repr(C)]
@@ -39,37 +38,6 @@ impl<T: ?Sized, C: RefCount> RcBox<T, C> {
     unsafe fn offset_of_value(value: &T) -> usize {
         Self::layout_nopad_for_value(value).unwrap().1
     }
-
-    /// Allocate and initialize an RcBox from a raw pointer.
-    ///
-    /// Returns a pointer to the allocated RcBox;
-    /// its contents are copied from the ptr, and counter initialized.
-    unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
-        let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
-        let nopad_size = layout_nopad.size();
-        let pthin = std::alloc::alloc(layout_nopad.pad_to_align());
-        let pthin = NonNull::new(pthin).unwrap();
-        let pvalue = pthin.as_ptr().add(offset);
-
-        // memcpy the contents.
-        assume!(offset <= nopad_size);
-        let copy_size = nopad_size - offset;
-        std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue, copy_size);
-
-        // Let the pfat is a fat pointer to the allocated memory.
-        // At this moment, it is initialized with dummy address and valid metadata by using ptr.
-        let mut pfat = MaybeFatPtr::from_raw(ptr);
-        // Fix address part to valid address.
-        *pfat.address_part_mut() = pthin.as_ptr() as usize;
-
-        let pbox = pfat.into_raw() as *mut RcBox<T, C>;
-        let mut pbox = NonNull::new(pbox).unwrap_unchecked();
-
-        // Initialize the counter
-        std::ptr::write(&mut pbox.as_mut().strong, C::one());
-
-        pbox
-    }
 }
 
 impl<T, C: RefCount> RcBox<T, C> {
@@ -93,6 +61,30 @@ impl<T, C: RefCount> RcBox<T, C> {
         ptr: NonNull<RcBox<[MaybeUninit<T>], C>>,
     ) -> NonNull<RcBox<[T], C>> {
         NonNull::new(ptr.as_ptr() as *mut RcBox<[T], C>).unwrap_unchecked()
+    }
+
+    /// Allocate and initialize an RcBox from a raw pointer.
+    ///
+    /// Returns a pointer to the allocated RcBox;
+    /// its contents are copied from the ptr, and counter initialized.
+    unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
+        let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
+        let nopad_size = layout_nopad.size();
+        let pthin = std::alloc::alloc(layout_nopad.pad_to_align());
+        let pthin = NonNull::new(pthin).unwrap();
+        let pvalue = pthin.as_ptr().add(offset);
+
+        // memcpy the contents.
+        assume!(offset <= nopad_size);
+        let copy_size = nopad_size - offset;
+        std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue, copy_size);
+
+        let mut pbox = pthin.cast::<RcBox<T, C>>();
+
+        // Initialize the counter
+        std::ptr::write(&mut pbox.as_mut().strong, C::one());
+
+        pbox
     }
 }
 
@@ -178,15 +170,13 @@ impl<T, C: RefCount> RcBase<T, C> {
 
         let offset = RcBox::<T, C>::offset_of_value(&*ptr);
 
-        let mut pfat = MaybeFatPtr::from_raw(ptr);
-
         // Fix address of the pointer.
-        let address = *pfat.address_part();
+        let address = ptr as usize;
         assume!(offset <= address);
-        *pfat.address_part_mut() = address - offset;
+        let pbox = address - offset;
 
         // Reinterpret the pptr as a pointer to RcBox.
-        let pbox = pfat.into_raw() as *mut RcBox<T, C>;
+        let pbox = pbox as *mut RcBox<T, C>;
 
         Self::from_inner(NonNull::new(pbox).unwrap_unchecked())
     }

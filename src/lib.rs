@@ -43,7 +43,6 @@
 #[macro_use]
 mod macros;
 mod base;
-mod maybe_fat;
 
 pub mod arc;
 pub mod rc;
