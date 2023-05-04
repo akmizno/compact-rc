@@ -48,14 +48,20 @@ impl<T, C: RefCount> RcBox<T, C> {
     unsafe fn allocate_for_slice(len: usize) -> NonNull<RcBox<[MaybeUninit<T>], C>> {
         let layout_value = Layout::array::<T>(len).unwrap();
         let (layout_nopad, _) = Self::layout_nopad(layout_value).unwrap();
-        let tp = std::alloc::alloc(layout_nopad.pad_to_align());
-        let mut tp = NonNull::new(tp).unwrap();
+        let pthin = std::alloc::alloc(layout_nopad.pad_to_align());
+        assume!(!pthin.is_null());
+
         // Convert thin pointer to fat pointer.
-        let fp = std::ptr::slice_from_raw_parts_mut(tp.as_mut(), len);
-        let pbox = fp as *mut RcBox<[MaybeUninit<T>], C>;
-        let mut pbox = NonNull::new(pbox).unwrap_unchecked();
-        std::ptr::write(&mut pbox.as_mut().strong, C::one());
-        pbox
+        let pfat = std::ptr::slice_from_raw_parts_mut::<T>(pthin as *mut T, len);
+
+        let pbox = pfat as *mut RcBox<[MaybeUninit<T>], MaybeUninit<C>>;
+
+        // Initialize the refcount
+        (*pbox).strong.write(C::one());
+
+        let pbox = pfat as *mut RcBox<[MaybeUninit<T>], C>;
+
+        NonNull::new(pbox).unwrap_unchecked()
     }
     unsafe fn assume_init_slice(
         ptr: NonNull<RcBox<[MaybeUninit<T>], C>>,
@@ -71,20 +77,24 @@ impl<T, C: RefCount> RcBox<T, C> {
         let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
         let nopad_size = layout_nopad.size();
         let palloc = std::alloc::alloc(layout_nopad.pad_to_align());
-        let palloc = NonNull::new(palloc).unwrap();
-        let pvalue = palloc.as_ptr().add(offset);
+        assume!(!palloc.is_null());
+
+        let pbox = palloc.cast::<RcBox<MaybeUninit<T>, MaybeUninit<C>>>();
+
+        // Initialize the refcount
+        (*pbox).strong.write(C::one());
 
         // memcpy the content.
         assume!(offset <= nopad_size);
         let copy_size = nopad_size - offset;
-        std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue, copy_size);
+        std::ptr::copy_nonoverlapping(
+            ptr as *const u8,
+            (*pbox).value.as_mut_ptr() as *mut u8,
+            copy_size,
+        );
 
-        let mut pbox = palloc.cast::<RcBox<T, C>>();
-
-        // Initialize the counter
-        std::ptr::write(&mut pbox.as_mut().strong, C::one());
-
-        pbox
+        let pbox = pbox.cast::<RcBox<T, C>>();
+        NonNull::new(pbox).unwrap_unchecked()
     }
 }
 
