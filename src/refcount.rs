@@ -11,7 +11,7 @@ pub trait RefCount {
     /// The object is initialized as "one".
     fn one() -> Self;
 
-    /// Checks a value equals to one.
+    /// Checks whether a value equals to one.
     fn is_one(val: &Self::Value) -> bool;
 
     /// Gets a current value.
@@ -24,15 +24,17 @@ pub trait RefCount {
     fn fetch_dec(&self) -> Self::Value;
 }
 
-/// Implement RefCount for Cell<$type>.
+/// Implements RefCount for Cell<$type>.
 /// Its implementors are used as single-threaded refcount.
-macro_rules! impl_cell_counter {
+macro_rules! impl_cell_refcount {
     ($type:ty) => {
         impl RefCount for Cell<$type> {
             type Value = $type;
 
             fn one() -> Self {
-                Self::new(1)
+                let one = Self::new(1);
+                debug_assert!(Self::is_one(&one.load()));
+                one
             }
 
             fn is_one(val: &Self::Value) -> bool {
@@ -58,29 +60,30 @@ macro_rules! impl_cell_counter {
             fn fetch_dec(&self) -> Self::Value {
                 let current = self.load();
                 assume!(0 < current);
-                let c = current - 1;
-                self.set(c);
+                self.set(current - 1);
                 current
             }
         }
     };
 }
 
-impl_cell_counter!(u8);
-impl_cell_counter!(u16);
-impl_cell_counter!(u32);
-impl_cell_counter!(u64);
-impl_cell_counter!(usize);
+impl_cell_refcount!(u8);
+impl_cell_refcount!(u16);
+impl_cell_refcount!(u32);
+impl_cell_refcount!(u64);
+impl_cell_refcount!(usize);
 
-/// Implement RefCount for atomic $types.
+/// Implements RefCount for atomic $types.
 /// Its implementors are used as multi-threaded refcount.
-macro_rules! impl_atomic_counter {
+macro_rules! impl_atomic_refcount {
     ($type:ty, $value_type:ty) => {
         impl RefCount for $type {
             type Value = $value_type;
 
             fn one() -> Self {
-                Self::new(1)
+                let one = Self::new(1);
+                debug_assert!(Self::is_one(&RefCount::load(&one)));
+                one
             }
 
             fn is_one(val: &Self::Value) -> bool {
@@ -102,8 +105,8 @@ macro_rules! impl_atomic_counter {
     };
 }
 
-impl_atomic_counter!(AtomicU8, u8);
-impl_atomic_counter!(AtomicU16, u16);
-impl_atomic_counter!(AtomicU32, u32);
-impl_atomic_counter!(AtomicU64, u64);
-impl_atomic_counter!(AtomicUsize, usize);
+impl_atomic_refcount!(AtomicU8, u8);
+impl_atomic_refcount!(AtomicU16, u16);
+impl_atomic_refcount!(AtomicU32, u32);
+impl_atomic_refcount!(AtomicU64, u64);
+impl_atomic_refcount!(AtomicUsize, usize);
