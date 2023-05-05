@@ -2,7 +2,7 @@
 Low-memory reference-counting pointers.
 
 The types in this crate have almost the same methods as standard `Rc` and `Arc`.
-The differences from the standard type is as follows:
+The differences from the standard type are as follows:
 
 - Weak reference is not supported.
 - Small integers can be used as refcount.
@@ -12,9 +12,7 @@ The differences from the standard type is as follows:
 | `std`        | `usize`                            | `usize`       |
 | `compact-rc` | `u8`, `u16`, `u32`, `u64`, `usize` | not supported |
 
-Due to the differences, some methods such as `weak_count` are not provided.
-
-# Sample code
+## Example
 ```rust
 use compact_rc::Rc8;
 
@@ -33,5 +31,6 @@ fn main() {
     assert_eq!(Rc8::strong_count(&rc2), 2);
     assert_eq!(*rc1, 100);
     assert_eq!(*rc2, 100);
+    assert!(Rc8::ptr_eq(&rc1, &rc2));
 }
 ```
