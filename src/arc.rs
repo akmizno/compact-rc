@@ -1,9 +1,8 @@
 use std::borrow;
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::ffi::{CStr, CString};
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::iter;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -34,6 +33,7 @@ pub type Arc<T> = ArcX<T, AtomicUsize>;
 /// - [Arc16]
 /// - [Arc32]
 /// - [Arc64]
+#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct ArcX<T: ?Sized, C>(RcBase<T, C>)
 where
     C: RefCount + Sync + Send;
@@ -124,80 +124,12 @@ where
     }
 }
 
-impl<T: ?Sized, C> Clone for ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    fn clone(&self) -> ArcX<T, C> {
-        Self(self.0.clone())
-    }
-}
-
-impl<T: Default, C> Default for ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    fn default() -> ArcX<T, C> {
-        ArcX::new(Default::default())
-    }
-}
-
-impl<T: ?Sized + PartialEq, C> PartialEq for ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    fn eq(&self, other: &ArcX<T, C>) -> bool {
-        PartialEq::eq(&self.0, &other.0)
-    }
-    fn ne(&self, other: &ArcX<T, C>) -> bool {
-        PartialEq::ne(&self.0, &other.0)
-    }
-}
-
-impl<T: ?Sized + Eq, C> Eq for ArcX<T, C> where C: RefCount + Sync + Send {}
-
-impl<T: ?Sized + PartialOrd, C> PartialOrd for ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    fn partial_cmp(&self, other: &ArcX<T, C>) -> Option<Ordering> {
-        PartialOrd::partial_cmp(&self.0, &other.0)
-    }
-}
-
-impl<T: ?Sized + Ord, C> Ord for ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    fn cmp(&self, other: &ArcX<T, C>) -> Ordering {
-        Ord::cmp(&self.0, &other.0)
-    }
-}
-
-impl<T: ?Sized + Hash, C> Hash for ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        Hash::hash(&self.0, state)
-    }
-}
-
 impl<T: ?Sized + fmt::Display, C> fmt::Display for ArcX<T, C>
 where
     C: RefCount + Sync + Send,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl<T: ?Sized + fmt::Debug, C> fmt::Debug for ArcX<T, C>
-where
-    C: RefCount + Sync + Send,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&self.0, f)
     }
 }
 
