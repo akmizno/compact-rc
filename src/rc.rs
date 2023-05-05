@@ -1,9 +1,10 @@
 use std::borrow;
 use std::borrow::Cow;
 use std::cell::Cell;
+use std::cmp::Ordering;
 use std::ffi::{CStr, CString};
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::iter;
 use std::ops::Deref;
 use std::pin::Pin;
@@ -33,7 +34,6 @@ pub type Rc<T> = RcX<T, usize>;
 /// - [Rc16]
 /// - [Rc32]
 /// - [Rc64]
-#[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct RcX<T: ?Sized, C>(RcBase<T, Cell<C>>)
 where
     Cell<C>: RefCount;
@@ -124,12 +124,80 @@ where
     }
 }
 
+impl<T: ?Sized, C> Clone for RcX<T, C>
+where
+    Cell<C>: RefCount,
+{
+    fn clone(&self) -> RcX<T, C> {
+        Self(self.0.clone())
+    }
+}
+
+impl<T: Default, C> Default for RcX<T, C>
+where
+    Cell<C>: RefCount,
+{
+    fn default() -> RcX<T, C> {
+        RcX::new(Default::default())
+    }
+}
+
+impl<T: ?Sized + PartialEq, C> PartialEq for RcX<T, C>
+where
+    Cell<C>: RefCount,
+{
+    fn eq(&self, other: &RcX<T, C>) -> bool {
+        PartialEq::eq(&self.0, &other.0)
+    }
+    fn ne(&self, other: &RcX<T, C>) -> bool {
+        PartialEq::ne(&self.0, &other.0)
+    }
+}
+
+impl<T: ?Sized + Eq, C> Eq for RcX<T, C> where Cell<C>: RefCount {}
+
+impl<T: ?Sized + PartialOrd, C> PartialOrd for RcX<T, C>
+where
+    Cell<C>: RefCount,
+{
+    fn partial_cmp(&self, other: &RcX<T, C>) -> Option<Ordering> {
+        PartialOrd::partial_cmp(&self.0, &other.0)
+    }
+}
+
+impl<T: ?Sized + Ord, C> Ord for RcX<T, C>
+where
+    Cell<C>: RefCount,
+{
+    fn cmp(&self, other: &RcX<T, C>) -> Ordering {
+        Ord::cmp(&self.0, &other.0)
+    }
+}
+
+impl<T: ?Sized + Hash, C> Hash for RcX<T, C>
+where
+    Cell<C>: RefCount,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Hash::hash(&self.0, state)
+    }
+}
+
 impl<T: ?Sized + fmt::Display, C> fmt::Display for RcX<T, C>
 where
     Cell<C>: RefCount,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl<T: ?Sized + fmt::Debug, C> fmt::Debug for RcX<T, C>
+where
+    Cell<C>: RefCount,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
     }
 }
 
