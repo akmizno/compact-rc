@@ -104,7 +104,7 @@ impl<T, C: RefCount> RcBox<T, C> {
     }
 }
 
-/// Base type of [RcX] and [ArcX]
+/// Base type of [RcX](crate::rc::RcX) and [ArcX](crate::arc::ArcX)
 pub(crate) struct RcBase<T: ?Sized, C: RefCount> {
     ptr: NonNull<RcBox<T, C>>,
 
