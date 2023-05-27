@@ -61,6 +61,10 @@ where
     }
 
     /// See [std::sync::Arc::from_raw].
+    ///
+    /// # Incompatibility
+    /// Unlike the standard `Arc`, this method does not support dynamically sized types (DSTs)
+    /// because some unstabilized features are required to implement this for DSTs.
     #[inline]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self(RcBase::from_raw(ptr))

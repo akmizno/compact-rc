@@ -257,7 +257,7 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
 
     #[inline]
     pub(crate) fn strong_count(this: &Self) -> C::Value {
-        unsafe { this.inner().strong().load() }
+        unsafe { this.inner().strong().load_acquire() }
     }
 
     #[inline]
@@ -308,9 +308,15 @@ impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
     #[inline]
     fn drop(&mut self) {
         unsafe {
-            if C::is_one(&self.inner().strong().fetch_dec()) {
-                drop(Box::from_raw(self.ptr.as_mut()));
+            if !C::is_one(&self.inner().strong().fetch_dec_release()) {
+                return;
             }
+
+            // Memory fence
+            // Fence with acquire ordering is needed before dropping data.
+            self.inner().strong().fence_acquire();
+
+            drop(Box::from_raw(self.ptr.as_mut()));
         }
     }
 }
@@ -319,7 +325,7 @@ impl<T: ?Sized, C: RefCount> Clone for RcBase<T, C> {
     #[inline]
     fn clone(&self) -> RcBase<T, C> {
         unsafe {
-            self.inner().strong().fetch_inc();
+            self.inner().strong().fetch_inc_relaxed();
             Self::from_inner(self.ptr)
         }
     }
