@@ -298,7 +298,7 @@ impl<T: Clone, C: RefCount> RcBase<T, C> {
 impl<T: ?Sized, C: RefCount> Deref for RcBase<T, C> {
     type Target = T;
 
-    #[inline]
+    #[inline(always)]
     fn deref(&self) -> &T {
         unsafe { &self.inner().value }
     }

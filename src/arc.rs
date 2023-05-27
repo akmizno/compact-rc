@@ -131,7 +131,7 @@ where
 {
     type Target = T;
 
-    #[inline]
+    #[inline(always)]
     fn deref(&self) -> &T {
         self.0.deref()
     }
