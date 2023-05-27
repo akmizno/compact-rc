@@ -32,9 +32,7 @@ macro_rules! impl_cell_refcount {
             type Value = $type;
 
             fn one() -> Self {
-                let one = Self::new(1);
-                debug_assert!(Self::is_one(&one.load()));
-                one
+                Self::new(1)
             }
 
             fn is_one(val: &Self::Value) -> bool {
@@ -46,22 +44,22 @@ macro_rules! impl_cell_refcount {
             }
 
             fn fetch_inc(&self) -> Self::Value {
-                let current = self.load();
-                assume!(current != 0);
-                match current.checked_add(1) {
+                let count = self.load();
+                assume!(count != 0);
+                match count.checked_add(1) {
                     Some(c) => {
                         self.set(c);
-                        current
+                        count
                     }
                     None => std::process::abort(),
                 }
             }
 
             fn fetch_dec(&self) -> Self::Value {
-                let current = self.load();
-                assume!(0 < current);
-                self.set(current - 1);
-                current
+                let count = self.load();
+                assume!(0 < count);
+                self.set(count - 1);
+                count
             }
         }
     };
@@ -81,9 +79,7 @@ macro_rules! impl_atomic_refcount {
             type Value = $value_type;
 
             fn one() -> Self {
-                let one = Self::new(1);
-                debug_assert!(Self::is_one(&RefCount::load(&one)));
-                one
+                Self::new(1)
             }
 
             fn is_one(val: &Self::Value) -> bool {
@@ -95,11 +91,17 @@ macro_rules! impl_atomic_refcount {
             }
 
             fn fetch_inc(&self) -> Self::Value {
-                self.fetch_add(1, Ordering::AcqRel)
+                let count = self.fetch_add(1, Ordering::AcqRel);
+                if count == <$value_type>::MAX {
+                    std::process::abort();
+                }
+                count
             }
 
             fn fetch_dec(&self) -> Self::Value {
-                self.fetch_sub(1, Ordering::AcqRel)
+                let count = self.fetch_sub(1, Ordering::AcqRel);
+                assume!(0 < count);
+                count
             }
         }
     };
