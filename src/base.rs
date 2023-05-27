@@ -21,20 +21,24 @@ struct RcBox<T: ?Sized, C> {
 }
 
 impl<T: ?Sized, C: RefCount> RcBox<T, C> {
+    #[inline]
     fn strong(&self) -> &C {
         &self.strong
     }
 
+    #[inline]
     unsafe fn layout_nopad(layout_value: Layout) -> Result<(Layout, usize), LayoutError> {
         let layout_strong = Layout::new::<C>();
         layout_strong.extend(layout_value)
     }
 
+    #[inline]
     unsafe fn layout_nopad_for_value(value: &T) -> Result<(Layout, usize), LayoutError> {
         let layout_value = Layout::for_value(value);
         Self::layout_nopad(layout_value)
     }
 
+    #[inline]
     unsafe fn offset_of_value(value: &T) -> usize {
         Self::layout_nopad_for_value(value).unwrap().1
     }
@@ -63,6 +67,8 @@ impl<T, C: RefCount> RcBox<T, C> {
 
         NonNull::new(pbox).unwrap_unchecked()
     }
+
+    #[inline]
     unsafe fn assume_init_slice(
         ptr: NonNull<RcBox<[MaybeUninit<T>], C>>,
     ) -> NonNull<RcBox<[T], C>> {
@@ -99,6 +105,7 @@ impl<T, C: RefCount> RcBox<T, C> {
 }
 
 impl<T, C: RefCount> RcBox<T, C> {
+    #[inline]
     unsafe fn as_uninit(&mut self) -> &mut RcBox<MaybeUninit<T>, C> {
         mem::transmute(self)
     }
@@ -130,6 +137,7 @@ impl<T: RefUnwindSafe + ?Sized, C: RefCount> UnwindSafe for RcBase<T, C> {}
 impl<T: RefUnwindSafe + ?Sized, C: RefCount> RefUnwindSafe for RcBase<T, C> {}
 
 impl<T, C: RefCount> RcBase<T, C> {
+    #[inline]
     unsafe fn unwrap_unchecked(self) -> T {
         assume!(RcBase::is_unique(&self));
 
@@ -146,6 +154,7 @@ impl<T, C: RefCount> RcBase<T, C> {
         uninit_rcbox.value.assume_init_read()
     }
 
+    #[inline]
     pub(crate) fn new(value: T) -> RcBase<T, C> {
         unsafe {
             Self::from_inner(
@@ -158,6 +167,7 @@ impl<T, C: RefCount> RcBase<T, C> {
         }
     }
 
+    #[inline]
     pub(crate) fn try_unwrap(this: Self) -> Result<T, Self> {
         if Self::is_unique(&this) {
             unsafe { Ok(Self::unwrap_unchecked(this)) }
@@ -166,6 +176,7 @@ impl<T, C: RefCount> RcBase<T, C> {
         }
     }
 
+    #[inline]
     unsafe fn from_box(v: Box<T>) -> RcBase<T, C> {
         let ptr = v.as_ref() as *const T;
         let inner = RcBox::<T, C>::alloc_copy_from_ptr(ptr);
@@ -175,6 +186,7 @@ impl<T, C: RefCount> RcBase<T, C> {
         RcBase::from_inner(inner)
     }
 
+    #[inline]
     pub(crate) unsafe fn from_raw(ptr: *const T) -> Self {
         assume!(!ptr.is_null());
 
@@ -189,6 +201,7 @@ impl<T, C: RefCount> RcBase<T, C> {
         Self::from_inner(NonNull::new(pbox).unwrap_unchecked())
     }
 
+    #[inline]
     pub(crate) unsafe fn increment_strong_count(ptr: *const T) {
         let rc = Self::from_raw(ptr);
         // Increment the refcount, but do not drop it.
@@ -196,6 +209,7 @@ impl<T, C: RefCount> RcBase<T, C> {
         mem::forget(rc);
     }
 
+    #[inline]
     pub(crate) unsafe fn decrement_strong_count(ptr: *const T) {
         let rc = Self::from_raw(ptr);
         // Decrement the refcount by dropping it.
@@ -204,19 +218,23 @@ impl<T, C: RefCount> RcBase<T, C> {
 }
 
 /// Deallocate the box without dropping its contents
+#[inline]
 unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
     let _drop = Box::from_raw(Box::into_raw(v) as *mut ManuallyDrop<T>);
 }
 
 impl<T: ?Sized, C: RefCount> RcBase<T, C> {
+    #[inline]
     unsafe fn inner(&self) -> &RcBox<T, C> {
         self.ptr.as_ref()
     }
 
+    #[inline]
     unsafe fn inner_mut(&mut self) -> &mut RcBox<T, C> {
         self.ptr.as_mut()
     }
 
+    #[inline]
     unsafe fn from_inner(ptr: NonNull<RcBox<T, C>>) -> Self {
         Self {
             ptr,
@@ -224,29 +242,35 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
         }
     }
 
+    #[inline]
     pub(crate) fn as_ptr(this: &Self) -> *const T {
         // The value should be initialized.
         unsafe { &(*NonNull::as_ptr(this.ptr)).value }
     }
 
+    #[inline]
     pub(crate) fn into_raw(this: Self) -> *const T {
         let ptr = Self::as_ptr(&this);
         mem::forget(this);
         ptr
     }
 
+    #[inline]
     pub(crate) fn strong_count(this: &Self) -> C::Value {
         unsafe { this.inner().strong().load() }
     }
 
+    #[inline]
     fn is_unique(this: &Self) -> bool {
         C::is_one(&Self::strong_count(this))
     }
 
+    #[inline]
     unsafe fn get_mut_unchecked(this: &mut Self) -> &mut T {
         &mut this.inner_mut().value
     }
 
+    #[inline]
     pub(crate) fn get_mut(this: &mut Self) -> Option<&mut T> {
         if Self::is_unique(this) {
             Some(unsafe { Self::get_mut_unchecked(this) })
@@ -255,12 +279,14 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
         }
     }
 
+    #[inline]
     pub(crate) fn ptr_eq(this: &Self, other: &Self) -> bool {
         Self::as_ptr(this) == Self::as_ptr(other)
     }
 }
 
 impl<T: Clone, C: RefCount> RcBase<T, C> {
+    #[inline]
     pub(crate) fn make_mut(this: &mut Self) -> &mut T {
         if !Self::is_unique(this) {
             *this = Self::new((**this).clone());
@@ -272,12 +298,14 @@ impl<T: Clone, C: RefCount> RcBase<T, C> {
 impl<T: ?Sized, C: RefCount> Deref for RcBase<T, C> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &T {
         unsafe { &self.inner().value }
     }
 }
 
 impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
+    #[inline]
     fn drop(&mut self) {
         unsafe {
             if C::is_one(&self.inner().strong().fetch_dec()) {
@@ -288,6 +316,7 @@ impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
 }
 
 impl<T: ?Sized, C: RefCount> Clone for RcBase<T, C> {
+    #[inline]
     fn clone(&self) -> RcBase<T, C> {
         unsafe {
             self.inner().strong().fetch_inc();
@@ -297,18 +326,21 @@ impl<T: ?Sized, C: RefCount> Clone for RcBase<T, C> {
 }
 
 impl<T: Default, C: RefCount> Default for RcBase<T, C> {
+    #[inline]
     fn default() -> RcBase<T, C> {
         RcBase::new(Default::default())
     }
 }
 
 impl<T: ?Sized + PartialEq, C: RefCount> PartialEq for RcBase<T, C> {
+    #[inline]
     fn eq(&self, other: &RcBase<T, C>) -> bool {
         // NOTE
         // Optimization by comparing their addresses can not be used for T: PartialEq.
         // For T: Eq, it is possible. But the specialization is unstable feature.
         PartialEq::eq(&**self, &**other)
     }
+    #[inline]
     fn ne(&self, other: &RcBase<T, C>) -> bool {
         PartialEq::ne(&**self, &**other)
     }
@@ -317,48 +349,56 @@ impl<T: ?Sized + PartialEq, C: RefCount> PartialEq for RcBase<T, C> {
 impl<T: ?Sized + Eq, C: RefCount> Eq for RcBase<T, C> {}
 
 impl<T: ?Sized + PartialOrd, C: RefCount> PartialOrd for RcBase<T, C> {
+    #[inline]
     fn partial_cmp(&self, other: &RcBase<T, C>) -> Option<Ordering> {
         PartialOrd::partial_cmp(&**self, &**other)
     }
 }
 
 impl<T: ?Sized + Ord, C: RefCount> Ord for RcBase<T, C> {
+    #[inline]
     fn cmp(&self, other: &RcBase<T, C>) -> Ordering {
         Ord::cmp(&**self, &**other)
     }
 }
 
 impl<T: ?Sized + Hash, C: RefCount> Hash for RcBase<T, C> {
+    #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         Hash::hash(&**self, state)
     }
 }
 
 impl<T: ?Sized + fmt::Display, C: RefCount> fmt::Display for RcBase<T, C> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&**self, f)
     }
 }
 
 impl<T: ?Sized + fmt::Debug, C: RefCount> fmt::Debug for RcBase<T, C> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
     }
 }
 
 impl<T: ?Sized, C: RefCount> fmt::Pointer for RcBase<T, C> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Pointer::fmt(&(RcBase::as_ptr(self)), f)
     }
 }
 
 impl<T, C: RefCount> From<T> for RcBase<T, C> {
+    #[inline]
     fn from(t: T) -> Self {
         Self::new(t)
     }
 }
 
 impl<T: Clone, C: RefCount> From<&[T]> for RcBase<[T], C> {
+    #[inline]
     fn from(v: &[T]) -> RcBase<[T], C> {
         unsafe {
             let mut pbox = RcBox::<T, C>::allocate_for_slice(v.len());
@@ -373,6 +413,7 @@ impl<T: Clone, C: RefCount> From<&[T]> for RcBase<[T], C> {
 }
 
 impl<C: RefCount> From<&str> for RcBase<str, C> {
+    #[inline]
     fn from(s: &str) -> RcBase<str, C> {
         let rc = RcBase::<[u8], C>::from(s.as_bytes());
         unsafe { mem::transmute(rc) }
@@ -380,12 +421,14 @@ impl<C: RefCount> From<&str> for RcBase<str, C> {
 }
 
 impl<C: RefCount> From<String> for RcBase<str, C> {
+    #[inline]
     fn from(s: String) -> RcBase<str, C> {
         RcBase::from(s.as_ref())
     }
 }
 
 impl<C: RefCount> From<&CStr> for RcBase<CStr, C> {
+    #[inline]
     fn from(s: &CStr) -> RcBase<CStr, C> {
         let rc = RcBase::<[u8], C>::from(s.to_bytes_with_nul());
         unsafe { mem::transmute(rc) }
@@ -393,18 +436,21 @@ impl<C: RefCount> From<&CStr> for RcBase<CStr, C> {
 }
 
 impl<C: RefCount> From<CString> for RcBase<CStr, C> {
+    #[inline]
     fn from(s: CString) -> RcBase<CStr, C> {
         RcBase::from(s.as_ref())
     }
 }
 
 impl<T, C: RefCount> From<Box<T>> for RcBase<T, C> {
+    #[inline]
     fn from(b: Box<T>) -> RcBase<T, C> {
         unsafe { RcBase::from_box(b) }
     }
 }
 
 impl<T, C: RefCount> From<Vec<T>> for RcBase<[T], C> {
+    #[inline]
     fn from(mut v: Vec<T>) -> RcBase<[T], C> {
         unsafe {
             let mut pbox = RcBox::<T, C>::allocate_for_slice(v.len());
@@ -424,6 +470,7 @@ impl<T, C: RefCount> From<Vec<T>> for RcBase<[T], C> {
 }
 
 impl<C: RefCount> From<RcBase<str, C>> for RcBase<[u8], C> {
+    #[inline]
     fn from(rc: RcBase<str, C>) -> Self {
         unsafe { mem::transmute(rc) }
     }
@@ -432,6 +479,7 @@ impl<C: RefCount> From<RcBase<str, C>> for RcBase<[u8], C> {
 impl<T, C: RefCount, const N: usize> TryFrom<RcBase<[T], C>> for RcBase<[T; N], C> {
     type Error = RcBase<[T], C>;
 
+    #[inline]
     fn try_from(boxed_slice: RcBase<[T], C>) -> Result<Self, Self::Error> {
         if boxed_slice.len() == N {
             Ok(unsafe { RcBase::from_raw(RcBase::into_raw(boxed_slice) as *mut [T; N]) })
@@ -442,18 +490,21 @@ impl<T, C: RefCount, const N: usize> TryFrom<RcBase<[T], C>> for RcBase<[T; N], 
 }
 
 impl<T, C: RefCount> iter::FromIterator<T> for RcBase<[T], C> {
+    #[inline]
     fn from_iter<I: iter::IntoIterator<Item = T>>(iter: I) -> Self {
         Self::from(iter.into_iter().collect::<Vec<T>>())
     }
 }
 
 impl<T: ?Sized, C: RefCount> borrow::Borrow<T> for RcBase<T, C> {
+    #[inline]
     fn borrow(&self) -> &T {
         &**self
     }
 }
 
 impl<T: ?Sized, C: RefCount> AsRef<T> for RcBase<T, C> {
+    #[inline]
     fn as_ref(&self) -> &T {
         &**self
     }

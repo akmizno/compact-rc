@@ -31,18 +31,22 @@ macro_rules! impl_cell_refcount {
         impl RefCount for Cell<$type> {
             type Value = $type;
 
+            #[inline]
             fn one() -> Self {
                 Self::new(1)
             }
 
+            #[inline]
             fn is_one(val: &Self::Value) -> bool {
                 *val == 1
             }
 
+            #[inline]
             fn load(&self) -> Self::Value {
                 self.get()
             }
 
+            #[inline]
             fn fetch_inc(&self) -> Self::Value {
                 let count = self.load();
                 assume!(count != 0);
@@ -55,6 +59,7 @@ macro_rules! impl_cell_refcount {
                 }
             }
 
+            #[inline]
             fn fetch_dec(&self) -> Self::Value {
                 let count = self.load();
                 assume!(0 < count);
@@ -78,18 +83,22 @@ macro_rules! impl_atomic_refcount {
         impl RefCount for $type {
             type Value = $value_type;
 
+            #[inline]
             fn one() -> Self {
                 Self::new(1)
             }
 
+            #[inline]
             fn is_one(val: &Self::Value) -> bool {
                 *val == 1
             }
 
+            #[inline]
             fn load(&self) -> Self::Value {
                 self.load(Ordering::Acquire)
             }
 
+            #[inline]
             fn fetch_inc(&self) -> Self::Value {
                 let count = self.fetch_add(1, Ordering::AcqRel);
                 if count == <$value_type>::MAX {
@@ -98,6 +107,7 @@ macro_rules! impl_atomic_refcount {
                 count
             }
 
+            #[inline]
             fn fetch_dec(&self) -> Self::Value {
                 let count = self.fetch_sub(1, Ordering::AcqRel);
                 assume!(0 < count);
