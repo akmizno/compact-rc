@@ -81,6 +81,12 @@ where
     pub unsafe fn decrement_strong_count(ptr: *const T) {
         RcBase::<T, C>::decrement_strong_count(ptr)
     }
+
+    /// See [std::sync::Arc::into_inner].
+    #[inline]
+    pub fn into_inner(this: Self) -> Option<T> {
+        RcBase::into_inner(this.0)
+    }
 }
 
 impl<T: ?Sized, C> ArcX<T, C>

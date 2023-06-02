@@ -215,6 +215,11 @@ impl<T, C: RefCount> RcBase<T, C> {
         // Decrement the refcount by dropping it.
         drop(rc);
     }
+
+    #[inline]
+    pub(crate) fn into_inner(this: Self) -> Option<T> {
+        Self::try_unwrap(this).ok()
+    }
 }
 
 /// Deallocate the box without dropping its contents
@@ -721,6 +726,30 @@ mod tests {
             let rc2 = rc.clone();
             drop(rc2);
             let v = Rc8::try_unwrap(rc);
+            assert_eq!(v.unwrap(), 1);
+        }
+    }
+
+    #[test]
+    fn into_inner() {
+        {
+            let rc = Rc8::new(1i32);
+            let v = Rc8::into_inner(rc);
+            assert_eq!(v.unwrap(), 1);
+        }
+
+        {
+            let rc = Rc8::new(1i32);
+            let rc2 = rc.clone();
+            assert!(Rc8::into_inner(rc).is_none());
+            assert_eq!(Rc8::into_inner(rc2).unwrap(), 1);
+        }
+
+        {
+            let rc = Rc8::new(1i32);
+            let rc2 = rc.clone();
+            drop(rc2);
+            let v = Rc8::into_inner(rc);
             assert_eq!(v.unwrap(), 1);
         }
     }
