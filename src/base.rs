@@ -139,8 +139,6 @@ impl<T: RefUnwindSafe + ?Sized, C: RefCount> RefUnwindSafe for RcBase<T, C> {}
 impl<T, C: RefCount> RcBase<T, C> {
     #[inline]
     unsafe fn unwrap_unchecked(self) -> T {
-        assume!(RcBase::is_unique(&self));
-
         // this forgets calling RcBase's destructor.
         let mut this: ManuallyDrop<Self> = ManuallyDrop::new(self);
 
@@ -217,8 +215,15 @@ impl<T, C: RefCount> RcBase<T, C> {
     }
 
     #[inline]
-    pub(crate) fn into_inner(this: Self) -> Option<T> {
-        Self::try_unwrap(this).ok()
+    pub(crate) fn into_inner(mut this: Self) -> Option<T> {
+        unsafe {
+            if !this.decref() {
+                mem::forget(this);
+                return None;
+            }
+
+            Some(Self::unwrap_unchecked(this))
+        }
     }
 }
 
@@ -229,6 +234,29 @@ unsafe fn deallocate_box<T: ?Sized>(v: Box<T>) {
 }
 
 impl<T: ?Sized, C: RefCount> RcBase<T, C> {
+    /// Decrements its refcount,
+    /// then returns true if it is unique, otherwise false.
+    ///
+    /// If this method is called from every clones in multi-threaded code,
+    /// it is guaranteed that exactly one of the calls returns true.
+    /// See also [std::sync::Arc::into_inner].
+    ///
+    /// # Warning
+    /// The object MUST be destructed and deallocated by caller when true is returned,
+    /// but NOT when false.
+    #[inline]
+    unsafe fn decref(&mut self) -> bool {
+        if !C::is_one(&self.inner().strong().fetch_dec_release()) {
+            return false;
+        }
+
+        // Memory fence
+        // Fence with acquire ordering is needed before dropping the object.
+        self.inner().strong().fence_acquire();
+
+        true
+    }
+
     #[inline]
     unsafe fn inner(&self) -> &RcBox<T, C> {
         self.ptr.as_ref()
@@ -313,13 +341,9 @@ impl<T: ?Sized, C: RefCount> Drop for RcBase<T, C> {
     #[inline]
     fn drop(&mut self) {
         unsafe {
-            if !C::is_one(&self.inner().strong().fetch_dec_release()) {
+            if !self.decref() {
                 return;
             }
-
-            // Memory fence
-            // Fence with acquire ordering is needed before dropping data.
-            self.inner().strong().fence_acquire();
 
             drop(Box::from_raw(self.ptr.as_mut()));
         }
