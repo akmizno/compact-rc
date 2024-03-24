@@ -986,32 +986,17 @@ mod tests {
 mod leak_ckeck {
     use super::*;
     use std::cell::Cell;
-    use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicU8;
     use std::thread;
 
     type Rc8<T> = RcBase<T, Cell<u8>>;
     type Arc8<T> = RcBase<T, AtomicU8>;
 
-    struct DropCount<'a> {
-        drop_count: &'a AtomicUsize,
-    }
-    impl<'a> DropCount<'a> {
-        fn new(drop_count: &'a AtomicUsize) -> Self {
-            DropCount { drop_count }
-        }
-    }
-
-    impl<'a> Drop for DropCount<'a> {
-        fn drop(&mut self) {
-            self.drop_count.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
     #[test]
     fn send() {
-        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+        let (counter, viewer) = dropcount::new();
 
-        let rc = Arc8::new(DropCount::new(&DROP_COUNT));
+        let rc = Arc8::new(counter);
 
         let rc2 = rc.clone();
         let th = thread::spawn(move || {
@@ -1022,85 +1007,86 @@ mod leak_ckeck {
 
         th.join().unwrap();
 
-        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(viewer.get(), 1);
     }
 
     #[test]
     fn sync() {
-        static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+        let (counter, viewer) = dropcount::new();
 
-        let rc = Arc8::new(DropCount::new(&DROP_COUNT));
+        let rc = Arc8::new(counter);
 
         thread::scope(|s| {
             s.spawn(|| {
                 let rc2 = rc.clone();
                 drop(rc2);
-                assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 0);
+                assert_eq!(viewer.get(), 0);
             });
         });
 
         drop(rc);
-        assert_eq!(DROP_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(viewer.get(), 1);
     }
 
     #[test]
     fn single() {
-        let drop_count = AtomicUsize::new(0);
-        let rc = Rc8::new(DropCount::new(&drop_count));
+        let (counter, viewer) = dropcount::new();
+
+        let rc = Rc8::new(counter);
         drop(rc);
-        assert_eq!(drop_count.into_inner(), 1);
+        assert_eq!(viewer.get(), 1);
     }
 
     #[test]
     fn clone() {
-        let drop_count = AtomicUsize::new(0);
-        let rc = Rc8::new(DropCount::new(&drop_count));
+        let (counter, viewer) = dropcount::new();
+        let rc = Rc8::new(counter);
         let rc2 = rc.clone();
         drop(rc);
         drop(rc2);
-        assert_eq!(drop_count.into_inner(), 1);
+        assert_eq!(viewer.get(), 1);
     }
 
     #[test]
     fn try_unwrap() {
         {
-            let drop_count = AtomicUsize::new(0);
+            let (counter, viewer) = dropcount::new();
             {
-                let rc = Rc8::new(DropCount::new(&drop_count));
+                let rc = Rc8::new(counter);
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_ok());
             }
-            assert_eq!(drop_count.into_inner(), 1);
+            assert_eq!(viewer.get(), 1);
         }
 
         {
-            let drop_count = AtomicUsize::new(0);
+            let (counter, viewer) = dropcount::new();
             {
-                let rc = Rc8::new(DropCount::new(&drop_count));
+                let rc = Rc8::new(counter);
                 let _rc2 = rc.clone();
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_err());
             }
-            assert_eq!(drop_count.into_inner(), 1);
+            assert_eq!(viewer.get(), 1);
         }
 
         {
-            let drop_count = AtomicUsize::new(0);
+            let (counter, viewer) = dropcount::new();
             {
-                let rc = Rc8::new(DropCount::new(&drop_count));
+                let rc = Rc8::new(counter);
                 let rc2 = rc.clone();
                 drop(rc2);
                 let v = Rc8::try_unwrap(rc);
                 assert!(v.is_ok());
             }
-            assert_eq!(drop_count.into_inner(), 1);
+            assert_eq!(viewer.get(), 1);
         }
     }
 
     #[test]
     fn increment_decrement_strong_count() {
-        let drop_count = AtomicUsize::new(0);
-        let rc = Rc8::new(DropCount::new(&drop_count));
+        let (counter, viewer) = dropcount::new();
+        let rc = Rc8::new(counter);
         let rc2 = rc.clone();
         let ptr = Rc8::into_raw(rc2);
 
@@ -1114,71 +1100,48 @@ mod leak_ckeck {
         }
         drop(rc);
 
-        assert_eq!(drop_count.into_inner(), 1);
+        assert_eq!(viewer.get(), 1);
     }
 
     #[test]
     fn from_box() {
-        let drop_count = AtomicUsize::new(0);
-        let b = Box::new(DropCount::new(&drop_count));
-        let rc = Rc8::<DropCount>::from(b);
+        let (counter, viewer) = dropcount::new();
+        let b = Box::new(counter);
+        let rc = Rc8::<dropcount::Counter>::from(b);
         drop(rc);
-        assert_eq!(drop_count.into_inner(), 1);
+        assert_eq!(viewer.get(), 1);
     }
 
     #[test]
     fn from_vec() {
-        let drop_counts0 = AtomicUsize::new(0);
-        let drop_counts1 = AtomicUsize::new(0);
-        let drop_counts2 = AtomicUsize::new(0);
-        let drop_counts3 = AtomicUsize::new(0);
-        let drop_counts4 = AtomicUsize::new(0);
+        let (counters, viewers) = dropcount::new_vec(5);
 
         {
-            let v = vec![
-                DropCount::new(&drop_counts0),
-                DropCount::new(&drop_counts1),
-                DropCount::new(&drop_counts2),
-                DropCount::new(&drop_counts3),
-                DropCount::new(&drop_counts4),
-            ];
-            let rc = Rc8::<[DropCount]>::from(v);
+            let rc = Rc8::<[dropcount::Counter]>::from(counters);
             assert_eq!(rc.len(), 5);
         }
 
-        assert_eq!(drop_counts0.into_inner(), 1);
-        assert_eq!(drop_counts1.into_inner(), 1);
-        assert_eq!(drop_counts2.into_inner(), 1);
-        assert_eq!(drop_counts3.into_inner(), 1);
-        assert_eq!(drop_counts4.into_inner(), 1);
+        assert_eq!(viewers[0].get(), 1);
+        assert_eq!(viewers[1].get(), 1);
+        assert_eq!(viewers[2].get(), 1);
+        assert_eq!(viewers[3].get(), 1);
+        assert_eq!(viewers[4].get(), 1);
     }
 
     #[test]
     fn from_iter() {
-        let drop_counts0 = AtomicUsize::new(0);
-        let drop_counts1 = AtomicUsize::new(0);
-        let drop_counts2 = AtomicUsize::new(0);
-        let drop_counts3 = AtomicUsize::new(0);
-        let drop_counts4 = AtomicUsize::new(0);
+        let (counters, viewers) = dropcount::new_vec(5);
 
         {
-            let v = vec![
-                DropCount::new(&drop_counts0),
-                DropCount::new(&drop_counts1),
-                DropCount::new(&drop_counts2),
-                DropCount::new(&drop_counts3),
-                DropCount::new(&drop_counts4),
-            ];
-
-            let rc = Rc8::<[DropCount]>::from_iter(v.into_iter());
+            let rc = Rc8::<[dropcount::Counter]>::from_iter(counters.into_iter());
             assert_eq!(rc.len(), 5);
         }
 
-        assert_eq!(drop_counts0.into_inner(), 1);
-        assert_eq!(drop_counts1.into_inner(), 1);
-        assert_eq!(drop_counts2.into_inner(), 1);
-        assert_eq!(drop_counts3.into_inner(), 1);
-        assert_eq!(drop_counts4.into_inner(), 1);
+        assert_eq!(viewers[0].get(), 1);
+        assert_eq!(viewers[1].get(), 1);
+        assert_eq!(viewers[2].get(), 1);
+        assert_eq!(viewers[3].get(), 1);
+        assert_eq!(viewers[4].get(), 1);
     }
 }
 
