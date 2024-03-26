@@ -314,7 +314,9 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
 
     #[inline]
     pub(crate) fn ptr_eq(this: &Self, other: &Self) -> bool {
-        Self::as_ptr(this) == Self::as_ptr(other)
+        // This function ignores the metadata of fat pointers.
+        // See Rc::ptr_eq.
+        std::ptr::addr_eq(Self::as_ptr(this), Self::as_ptr(other))
     }
 }
 
