@@ -1278,6 +1278,7 @@ mod rcbox_x86_64 {
             struct MyStruct(u32);
             impl MyTrait for MyStruct {}
             let value = MyStruct(0);
+            assert_eq!(0, value.0); // To suppress unused warning
             assert_eq!(4, RcBox8::<dyn MyTrait>::offset_of_value(&value));
             assert_eq!(4, RcBox16::<dyn MyTrait>::offset_of_value(&value));
             assert_eq!(4, RcBox32::<dyn MyTrait>::offset_of_value(&value));
