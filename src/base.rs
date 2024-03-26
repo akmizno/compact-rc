@@ -1146,7 +1146,8 @@ mod leak_ckeck {
 }
 
 #[cfg(test)]
-mod rcbox {
+#[cfg(target_arch = "x86_64")]
+mod rcbox_x86_64 {
     use super::*;
     use std::cell::Cell;
 
