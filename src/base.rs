@@ -244,7 +244,7 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
     /// # Warning
     /// The object MUST be destructed and deallocated by caller when true is returned,
     /// but NOT when false.
-    #[inline]
+    #[inline(always)]
     unsafe fn decref(&mut self) -> bool {
         if !C::is_one(&self.inner().strong().fetch_dec_release()) {
             return false;

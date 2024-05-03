@@ -55,17 +55,17 @@ macro_rules! impl_cell_refcount {
         impl RefCount for Cell<$type> {
             type Value = $type;
 
-            #[inline]
+            #[inline(always)]
             fn one() -> Self {
                 Self::new(1)
             }
 
-            #[inline]
+            #[inline(always)]
             fn is_one(val: &Self::Value) -> bool {
                 *val == 1
             }
 
-            #[inline]
+            #[inline(always)]
             fn load_acquire(&self) -> Self::Value {
                 self.get()
             }
@@ -75,7 +75,7 @@ macro_rules! impl_cell_refcount {
                 // noop
             }
 
-            #[inline]
+            #[inline(always)]
             fn fetch_inc_relaxed(&self) -> Self::Value {
                 let count = self.load_acquire();
                 assume!(count != 0);
@@ -88,7 +88,7 @@ macro_rules! impl_cell_refcount {
                 }
             }
 
-            #[inline]
+            #[inline(always)]
             fn fetch_dec_release(&self) -> Self::Value {
                 let count = self.load_acquire();
                 assume!(0 < count);
@@ -112,29 +112,29 @@ macro_rules! impl_atomic_refcount {
         impl RefCount for $type {
             type Value = $value_type;
 
-            #[inline]
+            #[inline(always)]
             fn one() -> Self {
                 Self::new(1)
             }
 
-            #[inline]
+            #[inline(always)]
             fn is_one(val: &Self::Value) -> bool {
                 *val == 1
             }
 
-            #[inline]
+            #[inline(always)]
             fn load_acquire(&self) -> Self::Value {
                 self.load(Ordering::Acquire)
             }
 
-            #[inline]
+            #[inline(always)]
             fn fence_acquire(&self) {
                 // Load-Acquire is used instead of a fence for performance[1].
                 // [1] https://developer.arm.com/documentation/102336/0100/Load-Acquire-and-Store-Release-instructions
                 let _count = self.load_acquire();
             }
 
-            #[inline]
+            #[inline(always)]
             fn fetch_inc_relaxed(&self) -> Self::Value {
                 let count = self.fetch_add(1, Ordering::Relaxed);
                 if count == <$value_type>::MAX {
@@ -144,7 +144,7 @@ macro_rules! impl_atomic_refcount {
                 count
             }
 
-            #[inline]
+            #[inline(always)]
             fn fetch_dec_release(&self) -> Self::Value {
                 let count = self.fetch_sub(1, Ordering::Release);
                 assume!(0 < count);
