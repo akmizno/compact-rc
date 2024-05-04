@@ -34,6 +34,9 @@
 //!     assert!(Rc8::ptr_eq(&rc1, &rc2));
 //! }
 //! ```
+
+#![feature(set_ptr_value)]
+
 #[macro_use]
 mod macros;
 mod base;

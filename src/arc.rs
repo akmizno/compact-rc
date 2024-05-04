@@ -305,6 +305,7 @@ where
 
 impl<T, C> From<Box<T>> for ArcX<T, C>
 where
+    T: ?Sized,
     C: RefCount + Sync + Send,
 {
     #[inline]

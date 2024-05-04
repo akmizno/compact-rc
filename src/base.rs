@@ -42,6 +42,31 @@ impl<T: ?Sized, C: RefCount> RcBox<T, C> {
     unsafe fn offset_of_value(value: &T) -> usize {
         Self::layout_nopad_for_value(value).unwrap().1
     }
+
+    /// Allocate and initialize an RcBox from a raw pointer.
+    ///
+    /// Returns a pointer to the allocated RcBox;
+    /// its contents are copied from the ptr, and counter initialized.
+    unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
+        let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
+        let nopad_size = layout_nopad.size();
+        let palloc = std::alloc::alloc(layout_nopad.pad_to_align());
+        assume!(!palloc.is_null());
+
+        let pbox = palloc.with_metadata_of(ptr as *mut RcBox<ManuallyDrop<T>, MaybeUninit<C>>);
+
+        // Initialize the refcount
+        (*pbox).strong.write(C::one());
+
+        // memcpy the content.
+        assume!(offset <= nopad_size);
+        let pvalue = (&mut (*pbox).value) as *mut ManuallyDrop<T>;
+        let copy_size = nopad_size - offset;
+        std::ptr::copy_nonoverlapping(ptr as *const u8, pvalue as *mut u8, copy_size);
+
+        let pbox = pbox.with_metadata_of(ptr as *const RcBox<T, C>);
+        NonNull::new(pbox).unwrap_unchecked()
+    }
 }
 
 impl<T, C: RefCount> RcBox<T, C> {
@@ -73,34 +98,6 @@ impl<T, C: RefCount> RcBox<T, C> {
         ptr: NonNull<RcBox<[MaybeUninit<T>], C>>,
     ) -> NonNull<RcBox<[T], C>> {
         NonNull::new(ptr.as_ptr() as *mut RcBox<[T], C>).unwrap_unchecked()
-    }
-
-    /// Allocate and initialize an RcBox from a raw pointer.
-    ///
-    /// Returns a pointer to the allocated RcBox;
-    /// its contents are copied from the ptr, and counter initialized.
-    unsafe fn alloc_copy_from_ptr(ptr: *const T) -> NonNull<RcBox<T, C>> {
-        let (layout_nopad, offset) = Self::layout_nopad_for_value(&*ptr).unwrap();
-        let nopad_size = layout_nopad.size();
-        let palloc = std::alloc::alloc(layout_nopad.pad_to_align());
-        assume!(!palloc.is_null());
-
-        let pbox = palloc.cast::<RcBox<MaybeUninit<T>, MaybeUninit<C>>>();
-
-        // Initialize the refcount
-        (*pbox).strong.write(C::one());
-
-        // memcpy the content.
-        assume!(offset <= nopad_size);
-        let copy_size = nopad_size - offset;
-        std::ptr::copy_nonoverlapping(
-            ptr as *const u8,
-            (*pbox).value.as_mut_ptr() as *mut u8,
-            copy_size,
-        );
-
-        let pbox = pbox.cast::<RcBox<T, C>>();
-        NonNull::new(pbox).unwrap_unchecked()
     }
 }
 
@@ -172,16 +169,6 @@ impl<T, C: RefCount> RcBase<T, C> {
         } else {
             Err(this)
         }
-    }
-
-    #[inline]
-    unsafe fn from_box(v: Box<T>) -> RcBase<T, C> {
-        let ptr = v.as_ref() as *const T;
-        let inner = RcBox::<T, C>::alloc_copy_from_ptr(ptr);
-
-        deallocate_box(v);
-
-        RcBase::from_inner(inner)
     }
 
     #[inline]
@@ -273,6 +260,16 @@ impl<T: ?Sized, C: RefCount> RcBase<T, C> {
             ptr,
             _phantom: PhantomData,
         }
+    }
+
+    #[inline]
+    unsafe fn from_box(v: Box<T>) -> RcBase<T, C> {
+        let ptr = v.as_ref() as *const T;
+        let inner = RcBox::<T, C>::alloc_copy_from_ptr(ptr);
+
+        deallocate_box(v);
+
+        RcBase::from_inner(inner)
     }
 
     #[inline]
@@ -479,7 +476,7 @@ impl<C: RefCount> From<CString> for RcBase<CStr, C> {
     }
 }
 
-impl<T, C: RefCount> From<Box<T>> for RcBase<T, C> {
+impl<T: ?Sized, C: RefCount> From<Box<T>> for RcBase<T, C> {
     #[inline]
     fn from(b: Box<T>) -> RcBase<T, C> {
         unsafe { RcBase::from_box(b) }
@@ -946,6 +943,13 @@ mod tests {
     fn from_box() {
         let b = Box::<String>::from("Hello".to_string());
         let rc = Rc8::<String>::from(b);
+        assert_eq!(&*rc, "Hello");
+    }
+
+    #[test]
+    fn from_unsized_box() {
+        let b = Box::<str>::from("Hello".to_string());
+        let rc = Rc8::<str>::from(b);
         assert_eq!(&*rc, "Hello");
     }
 

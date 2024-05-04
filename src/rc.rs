@@ -305,6 +305,7 @@ where
 
 impl<T, C> From<Box<T>> for RcX<T, C>
 where
+    T: ?Sized,
     Cell<C>: RefCount,
 {
     #[inline]
