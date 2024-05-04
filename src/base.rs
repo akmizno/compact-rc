@@ -15,7 +15,7 @@ use std::ptr::NonNull;
 use crate::refcount::RefCount;
 
 #[repr(C)]
-struct RcBox<T: ?Sized, C> {
+pub(crate) struct RcBox<T: ?Sized, C> {
     strong: C,
     value: T,
 }

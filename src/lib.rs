@@ -41,6 +41,9 @@
 mod macros;
 mod base;
 
+#[cfg(feature = "serde")]
+mod serde;
+
 pub mod arc;
 pub mod rc;
 pub mod refcount;

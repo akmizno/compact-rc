@@ -34,7 +34,7 @@ pub type Arc<T> = ArcX<T, AtomicUsize>;
 /// - [Arc16]
 /// - [Arc32]
 /// - [Arc64]
-pub struct ArcX<T: ?Sized, C>(RcBase<T, C>)
+pub struct ArcX<T: ?Sized, C>(pub(crate) RcBase<T, C>)
 where
     C: RefCount + Sync + Send;
 

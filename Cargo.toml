@@ -3,6 +3,7 @@ name = "compact-rc"
 version = "0.5.5"
 rust = "1.76.0"
 edition = "2021"
+resolver = "2"
 authors = ["Akira Mizuno <akmizno@gmail.com>"]
 description = "Low-memory reference-counting pointers"
 keywords = ["arc", "rc", "data-structure"]
@@ -13,10 +14,12 @@ license = "MIT/Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-serde = ["dep:serde"]
+default = []
 
 [dependencies]
-serde = { version = "1.0.197", optional = true }
+serde = { version = "1.0.197", optional = true, default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 dropcount = "0.1"
+serde = { version = "1.0.197", default-features = false, features = ["derive"] }
+serde_json = "1.0.115"

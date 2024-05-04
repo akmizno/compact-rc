@@ -34,7 +34,7 @@ pub type Rc<T> = RcX<T, usize>;
 /// - [Rc16]
 /// - [Rc32]
 /// - [Rc64]
-pub struct RcX<T: ?Sized, C>(RcBase<T, Cell<C>>)
+pub struct RcX<T: ?Sized, C>(pub(crate) RcBase<T, Cell<C>>)
 where
     Cell<C>: RefCount;
 
